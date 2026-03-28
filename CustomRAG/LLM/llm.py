@@ -2,65 +2,67 @@ import requests
 import textwrap
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL      = "llama3"   # swap for mistral, phi3, etc.
+MODEL      = "llama3"   # swap for mistral, phi3, etc. — must be pulled via `ollama pull`
 
-# Approximate character budget for context.
-# llama3 has an 8k-token window; ~4 chars/token → ~28 000 chars safe limit.
-# Leave ~2 000 chars for the prompt wrapper and the answer.
-MAX_CONTEXT_CHARS = 26_000
+# llama3 has an 8k-token window (~4 chars/token → ~32k chars).
+# Leave ~2k chars for the prompt wrapper and model's answer.
+MAX_CONTEXT_CHARS = 28_000
+
 
 # -----------------------------
 # BUILD CONTEXT
-# Truncates long chunks so we never silently overflow the model window.
+# Formats retrieved chunks into numbered source blocks.
+# Truncates if the total would overflow the model's context window.
 # -----------------------------
 def build_context(results: list[dict], max_chars: int = MAX_CONTEXT_CHARS) -> str:
-    blocks   = []
-    used     = 0
+    blocks = []
+    used   = 0
 
     for i, r in enumerate(results):
-        meta  = r["meta"]
-        text  = r["text"].strip()
+        meta = r["meta"]
+        sec  = meta.get("section")  or "Unknown"
+        sub  = meta.get("subsection") or ""
+        page = meta.get("page")     or "?"
+        text = r["text"].strip()
+
         header = (
-            f"[Source {i+1}]\n"
-            f"Section: {meta.get('section', 'N/A')}  "
-            f"Subsection: {meta.get('subsection', 'N/A')}  "
-            f"Page: {meta.get('page', 'N/A')}"
+            f"[Source {i+1}]  {sec} {sub}  (page {page})"
         )
-        block = f"{header}\n\n{text}"
+        block = f"{header}\n{text}"
 
         if used + len(block) > max_chars:
-            # include a truncated version rather than dropping it entirely
-            remaining = max_chars - used
-            if remaining > len(header) + 100:
-                block = f"{header}\n\n{text[:remaining - len(header) - 10]}…"
+            remaining = max_chars - used - len(header) - 10
+            if remaining > 80:
+                block = f"{header}\n{text[:remaining]}…"
                 blocks.append(block)
             break
 
         blocks.append(block)
-        used += len(block) + 2   # +2 for the separator
+        used += len(block) + 4   # separator
 
     return "\n\n---\n\n".join(blocks)
 
 
 # -----------------------------
-# PROMPT TEMPLATE
+# PROMPT  (tuned to Cooper City Code structure)
 # -----------------------------
 def build_prompt(query: str, context: str) -> str:
     return textwrap.dedent(f"""\
-        You are a civil engineering code assistant specializing in municipal codes.
+        You are a civil engineering and municipal law assistant for Cooper City, Florida.
 
-        Answer the question using ONLY the provided context.
+        Answer the question using ONLY the provided Code of Ordinances context below.
 
         Rules:
-        - Be precise and technical.
-        - Cite section and subsection for every claim (e.g., Sec. 1-43 (a)).
-        - Do NOT fabricate information.
-        - If the answer is not in the context, say exactly: "Not found in provided code."
+        - Cite the exact section and subsection for every claim, e.g. Sec. 2-4 (a).
+        - Be precise and technical. Use the language of the code where possible.
+        - If the answer is not found in the provided context, respond exactly:
+          "Not found in provided code sections."
+        - Do NOT fabricate dollar amounts, time limits, vote thresholds or other specifics.
 
         CONTEXT:
-        ==================
+        ════════════════════════════════════════
         {context}
-        ==================
+        ════════════════════════════════════════
 
         QUESTION:
         {query}
@@ -70,40 +72,42 @@ def build_prompt(query: str, context: str) -> str:
 
 
 # -----------------------------
-# CALL OLLAMA  (with timeout + error handling)
+# CALL OLLAMA  (timeout + structured error returns)
 # -----------------------------
 def call_ollama(prompt: str, timeout: int = 120) -> str:
     try:
-        response = requests.post(
+        resp = requests.post(
             OLLAMA_URL,
             json={
                 "model":  MODEL,
                 "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.1,   # low temp for factual code answers
-                    "num_predict": 512,   # cap response length
-                }
+                    "temperature": 0.05,  # near-deterministic for legal text
+                    "num_predict": 600,
+                },
             },
             timeout=timeout,
         )
-        response.raise_for_status()
-        return response.json()["response"].strip()
+        resp.raise_for_status()
+        return resp.json()["response"].strip()
 
     except requests.exceptions.Timeout:
-        return "Error: Ollama request timed out. Is the server running?"
+        return "Error: Ollama request timed out. Is `ollama serve` running?"
     except requests.exceptions.ConnectionError:
         return "Error: Cannot connect to Ollama at localhost:11434."
     except (KeyError, ValueError) as e:
-        return f"Error: Unexpected response from Ollama — {e}"
+        return f"Error: Unexpected Ollama response — {e}"
+    except requests.exceptions.HTTPError as e:
+        return f"Error: Ollama HTTP error — {e}"
 
 
 # -----------------------------
-# MAIN RAG FUNCTION
+# MAIN ENTRY POINT
 # -----------------------------
 def generate_answer(query: str, retrieval_results: list[dict]) -> str:
     if not retrieval_results:
-        return "No relevant sections found in the municipal code."
+        return "No relevant sections retrieved from the municipal code."
 
     context = build_context(retrieval_results)
     prompt  = build_prompt(query, context)
