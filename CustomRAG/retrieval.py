@@ -11,15 +11,18 @@ import pickle
 import numpy as np
 import faiss
 import re
+import os
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 # ─────────────────────────────────────────────────────────────
 # PATHS
 # ─────────────────────────────────────────────────────────────
-FAISS_INDEX_PATH = "./Data/FAISS/faiss.index"
-FAISS_META_PATH  = "./Data/FAISS/faiss_meta.pkl"
-BM25_PATH        = "./Data/bm25/bm25.pkl"
+PROJECT_ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DATA_DIR         = os.path.join(PROJECT_ROOT, "Data")
+FAISS_INDEX_PATH = os.path.join(DATA_DIR, "FAISS", "faiss.index")
+FAISS_META_PATH  = os.path.join(DATA_DIR, "FAISS", "faiss_meta.pkl")
+BM25_PATH        = os.path.join(DATA_DIR, "bm25", "bm25.pkl")
 
 # ─────────────────────────────────────────────────────────────
 # MODELS & DATA  (loaded once at import)
@@ -27,23 +30,60 @@ BM25_PATH        = "./Data/bm25/bm25.pkl"
 bi_encoder    = SentenceTransformer("all-MiniLM-L6-v2")
 cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-faiss_index    = faiss.read_index(FAISS_INDEX_PATH)
-faiss_metadata = pickle.load(open(FAISS_META_PATH, "rb"))
-
-bm25_corpus, bm25_texts = pickle.load(open(BM25_PATH, "rb"))
-bm25 = BM25Okapi(bm25_corpus)
-
-print(f"FAISS vectors : {faiss_index.ntotal:,}")
-print(f"BM25 docs     : {len(bm25_corpus):,}")
-
-# Build a lookup: jurisdiction name → set of faiss_metadata indices
-# Used for O(1) jurisdiction filtering without scanning all vectors.
+faiss_index = None
+faiss_metadata: list[dict] = []
+bm25_corpus: list[list[str]] = []
+bm25_texts: list[str] = []
+bm25 = None
 _JURISDICTION_IDX: dict[str, set[int]] = {}
-for i, entry in enumerate(faiss_metadata):
-    jur = entry["meta"].get("jurisdiction", "unknown")
-    _JURISDICTION_IDX.setdefault(jur, set()).add(i)
+_RESOURCE_STAMP: tuple[float, float, float] | None = None
 
-print(f"Jurisdictions : {list(_JURISDICTION_IDX.keys())}")
+
+def _current_resource_stamp() -> tuple[float, float, float] | None:
+    paths = [FAISS_INDEX_PATH, FAISS_META_PATH, BM25_PATH]
+    if not all(os.path.exists(path) for path in paths):
+        return None
+    return tuple(os.path.getmtime(path) for path in paths)
+
+
+def load_resources(force: bool = False) -> None:
+    global faiss_index, faiss_metadata, bm25_corpus, bm25_texts
+    global bm25, _JURISDICTION_IDX, _RESOURCE_STAMP
+
+    stamp = _current_resource_stamp()
+    if stamp is None:
+        raise FileNotFoundError("Retrieval artifacts are missing. Run the index build first.")
+    if not force and _RESOURCE_STAMP == stamp and faiss_index is not None and bm25 is not None:
+        return
+
+    faiss_index = faiss.read_index(FAISS_INDEX_PATH)
+    with open(FAISS_META_PATH, "rb") as f:
+        faiss_metadata = pickle.load(f)
+
+    with open(BM25_PATH, "rb") as f:
+        bm25_corpus, bm25_texts = pickle.load(f)
+    bm25 = BM25Okapi(bm25_corpus)
+
+    _JURISDICTION_IDX = {}
+    for i, entry in enumerate(faiss_metadata):
+        jur = entry["meta"].get("jurisdiction", "unknown")
+        _JURISDICTION_IDX.setdefault(jur, set()).add(i)
+
+    _RESOURCE_STAMP = stamp
+    print(f"FAISS vectors : {faiss_index.ntotal:,}")
+    print(f"BM25 docs     : {len(bm25_corpus):,}")
+    print(f"Jurisdictions : {list(_JURISDICTION_IDX.keys())}")
+
+
+def get_jurisdiction_stats() -> list[dict]:
+    load_resources()
+    return [
+        {"name": name, "chunks": len(indices)}
+        for name, indices in _JURISDICTION_IDX.items()
+    ]
+
+
+load_resources(force=True)
 
 # ─────────────────────────────────────────────────────────────
 # JURISDICTION ALIASES
@@ -185,6 +225,7 @@ def hybrid_search(
     jurisdiction=None  → search across ALL indexed codes
     jurisdiction="broward county" → restrict to Broward County, FL only
     """
+    load_resources()
     jurisdiction = resolve_jurisdiction(jurisdiction)
     expanded, predicted_sub = expand_query(query)
     section_filter = detect_section_filter(query, jurisdiction)

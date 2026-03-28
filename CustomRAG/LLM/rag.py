@@ -1,10 +1,81 @@
 import sys
 import os
+import re
+from urllib.parse import quote
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from retrieval import hybrid_search
+from retrieval import hybrid_search, detect_section_filter, resolve_jurisdiction
 from LLM.llm import generate_answer
+
+CUSTOM_RAG_BASE_URL = "http://localhost:8001"
+
+
+def _tokenize_query(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _estimate_accuracy(query: str, results: list[dict], jurisdiction: str | None) -> dict:
+    if not results:
+        return {
+            "score": 0,
+            "label": "Low",
+            "reason": "No supporting code sections were retrieved for this query.",
+        }
+
+    query_terms = {t for t in _tokenize_query(query) if len(t) > 2}
+    retrieved_text = " ".join(r["text"].lower() for r in results[:3])
+    covered_terms = sum(1 for term in query_terms if term in retrieved_text)
+    coverage = covered_terms / max(len(query_terms), 1)
+
+    rerank_scores = [float(r.get("rerank_score", 0.0)) for r in results[:3]]
+    rerank_strength = sum(rerank_scores) / max(len(rerank_scores), 1)
+
+    support_count = min(len(results) / 5, 1.0)
+
+    resolved_jurisdiction = resolve_jurisdiction(jurisdiction)
+    target_section = detect_section_filter(query, resolved_jurisdiction)
+    section_match = 0.75
+    if target_section:
+        top_sections = [r["meta"].get("section") for r in results[:3]]
+        section_match = 1.0 if target_section in top_sections else 0.2
+
+    raw_score = (
+        0.45 * rerank_strength +
+        0.30 * coverage +
+        0.15 * support_count +
+        0.10 * section_match
+    )
+    score = max(0, min(int(round(raw_score * 100)), 100))
+
+    if score >= 80:
+        label = "High"
+    elif score >= 60:
+        label = "Medium"
+    else:
+        label = "Low"
+
+    if target_section and section_match >= 1.0:
+        reason = f"Exact section match found for {target_section} with strong supporting text."
+    elif coverage >= 0.7:
+        reason = "Most of the key query terms appear in the top retrieved code sections."
+    elif coverage >= 0.4:
+        reason = "The retrieval partially matches the query, but the support is mixed."
+    else:
+        reason = "Only limited overlap was found between the query and the retrieved sections."
+
+    return {"score": score, "label": label, "reason": reason}
+
+
+def _build_source_link(meta: dict) -> str | None:
+    source = meta.get("source")
+    page = meta.get("page")
+    if not source:
+        return None
+    url = f"{CUSTOM_RAG_BASE_URL}/pdf/{quote(source)}"
+    if page:
+        url += f"#page={page}"
+    return url
 
 
 def ask(query: str,
@@ -39,20 +110,25 @@ def ask(query: str,
                   f"score={r['score']:.4f}  page={m.get('page')}")
 
     answer = generate_answer(query, results)
+    accuracy = _estimate_accuracy(query, results, jurisdiction)
 
     sources = [
         {
             "jurisdiction": r["meta"].get("jurisdiction"),
+            "source":       r["meta"].get("source"),
             "section":      r["meta"].get("section"),
             "subsection":   r["meta"].get("subsection"),
+            "title":        r["meta"].get("title"),
             "page":         r["meta"].get("page"),
             "score":        round(r["score"], 4),
+            "url":          _build_source_link(r["meta"]),
         }
         for r in results
     ]
 
     return {
         "answer":       answer,
+        "accuracy":     accuracy,
         "sources":      sources,
         "jurisdiction": jurisdiction,
     }

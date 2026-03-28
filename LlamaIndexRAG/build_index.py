@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -9,22 +10,40 @@ from llama_index.core import StorageContext
 from LlamaIndexRAG.config import embed_model, STORAGE_DIR, PDF_DIR
 
 
+def detect_jurisdiction(file_path: str) -> str:
+    filename = os.path.basename(file_path).lower()
+    if "broward" in filename:
+        return "Broward County, FL"
+    if "cooper" in filename:
+        return "Cooper City, FL"
+    return Path(file_path).stem.replace("_", " ")
+
+
+def build_file_metadata(file_path: str) -> dict:
+    return {
+        "jurisdiction": detect_jurisdiction(file_path),
+    }
+
+
 def build():
-    print("📄 Loading documents...")
-    documents = SimpleDirectoryReader(PDF_DIR).load_data()
+    print("Loading documents...")
+    documents = SimpleDirectoryReader(
+        PDF_DIR,
+        file_metadata=build_file_metadata,
+    ).load_data()
 
     print(f"Loaded {len(documents)} documents")
 
-    print("🧠 Building index...")
+    print("Building index...")
     index = VectorStoreIndex.from_documents(
         documents,
         embed_model=embed_model
     )
 
-    print("💾 Saving index...")
+    print("Saving index...")
     index.storage_context.persist(persist_dir=STORAGE_DIR)
 
-    print("✅ LlamaIndex build complete")
+    print("LlamaIndex build complete")
 
 
 if __name__ == "__main__":

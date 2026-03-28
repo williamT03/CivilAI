@@ -35,12 +35,15 @@ import pdfplumber    # column-aware extraction for two-column layouts
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
-PDF_PATH         = "./Data/PDF"
-CHROMA_DIR       = "./Data/chroma_db"
-FAISS_INDEX_PATH = "./Data/FAISS/faiss.index"
-FAISS_META_PATH  = "./Data/FAISS/faiss_meta.pkl"
-BM25_PATH        = "./Data/bm25/bm25.pkl"
-PROCESSED_FILE   = "./Data/processed_files.json"
+PROJECT_ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DATA_DIR         = os.path.join(PROJECT_ROOT, "Data")
+PDF_PATH         = os.path.join(DATA_DIR, "PDF")
+CHROMA_DIR       = os.path.join(DATA_DIR, "chroma_db")
+FAISS_INDEX_PATH = os.path.join(DATA_DIR, "FAISS", "faiss.index")
+FAISS_META_PATH  = os.path.join(DATA_DIR, "FAISS", "faiss_meta.pkl")
+BM25_PATH        = os.path.join(DATA_DIR, "bm25", "bm25.pkl")
+PROCESSED_FILE   = os.path.join(DATA_DIR, "processed_files.json")
+REQUIRED_ARTIFACTS = [FAISS_INDEX_PATH, FAISS_META_PATH, BM25_PATH]
 
 DIMENSION   = 384
 MAX_WORKERS = 4
@@ -192,6 +195,7 @@ def load_processed() -> dict:
     return {}
 
 def save_processed(data: dict) -> None:
+    os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
     with open(PROCESSED_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -264,7 +268,7 @@ def load_pdf(path: str, profile: JurisdictionProfile) -> list[dict]:
         else:
             return load_pdf_single_column(path)
     except Exception as e:
-        print(f"  ⚠️  Primary loader failed ({e}), falling back to PyMuPDF")
+        print(f"  WARNING: Primary loader failed ({e}), falling back to PyMuPDF")
         return load_pdf_single_column(path)
 
 # ─────────────────────────────────────────────────────────────
@@ -388,7 +392,7 @@ def process_pdf(path: str, filename: str, file_hash: str):
     profile      = detect_profile(path)
     jurisdiction = profile.name
 
-    print(f"  📄 {filename}")
+    print(f"  FILE: {filename}")
     print(f"     Profile     : {jurisdiction} "
           f"({'two-column' if profile.two_column else 'single-column'})")
 
@@ -397,7 +401,7 @@ def process_pdf(path: str, filename: str, file_hash: str):
     chunks     = chunk_sections(structured, profile, jurisdiction)
 
     if not chunks:
-        print(f"  ⚠️  No chunks extracted — check profile regex")
+        print("  WARNING: No chunks extracted - check profile regex")
         return [], np.array([]), [], [], []
 
     print(f"     Chunks      : {len(chunks):,}")
@@ -438,13 +442,18 @@ for d in [os.path.dirname(FAISS_INDEX_PATH),
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 collection    = chroma_client.get_or_create_collection(name="pdf_docs")
 
-if os.path.exists(FAISS_INDEX_PATH):
-    print("🔁 Loading existing FAISS index...")
+storage_ready = all(os.path.exists(path) for path in REQUIRED_ARTIFACTS)
+
+if storage_ready:
+    print("Loading existing FAISS index...")
     faiss_index    = faiss.read_index(FAISS_INDEX_PATH)
     with open(FAISS_META_PATH, "rb") as f:
         faiss_metadata = pickle.load(f)
 else:
-    print("🆕 Creating FAISS index...")
+    missing = [path for path in REQUIRED_ARTIFACTS if not os.path.exists(path)]
+    if missing:
+        print("Creating FAISS index...")
+        print("   Missing storage artifacts detected; rebuilding index files.")
     faiss_index    = faiss.IndexHNSWFlat(DIMENSION, 32)
     faiss_metadata = []
 
@@ -454,7 +463,7 @@ bm25_corpus = []
 # ─────────────────────────────────────────────────────────────
 # INGESTION LOOP
 # ─────────────────────────────────────────────────────────────
-processed  = load_processed()
+processed  = load_processed() if storage_ready else {}
 results    = []
 new_hashes: dict[str, str] = {}
 
@@ -466,7 +475,7 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         path = os.path.join(PDF_PATH, file)
         h    = get_file_hash(path)
         if h in processed:
-            print(f"  ⏭  {file} (already indexed)")
+            print(f"  SKIP: {file} (already indexed)")
             continue
         futures[ex.submit(process_pdf, path, file, h)] = (h, file)
 
@@ -478,7 +487,7 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
                 results.append(result)
                 new_hashes[h] = fname
         except Exception as e:
-            print(f"  ❌ {fname}: {e}")
+            print(f"  ERROR: {fname}: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # STORE & SAVE
@@ -500,14 +509,16 @@ for store_texts, embs, metas, ids, tokens in results:
 
 if results:
     faiss.write_index(faiss_index, FAISS_INDEX_PATH)
-    pickle.dump(faiss_metadata, open(FAISS_META_PATH, "wb"))
+    with open(FAISS_META_PATH, "wb") as f:
+        pickle.dump(faiss_metadata, f)
     bm25 = BM25Okapi(bm25_corpus)
-    pickle.dump((bm25_corpus, bm25_texts), open(BM25_PATH, "wb"))
+    with open(BM25_PATH, "wb") as f:
+        pickle.dump((bm25_corpus, bm25_texts), f)
     processed.update(new_hashes)
     save_processed(processed)
     total_chunks = sum(len(r[0]) for r in results)
-    print(f"\n✅ Indexed {len(results)} new file(s) — "
-          f"{total_chunks:,} new chunks — "
+    print(f"\nIndexed {len(results)} new file(s) - "
+          f"{total_chunks:,} new chunks - "
           f"{faiss_index.ntotal:,} total vectors")
 else:
-    print("\n✅ Nothing new to index.")
+    print("\nNothing new to index.")

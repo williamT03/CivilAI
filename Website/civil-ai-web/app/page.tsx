@@ -1,15 +1,33 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Source {
+  jurisdiction?: string;
+  source?: string;
   section?: string;
   subsection?: string;
+  title?: string;
+  page?: number;
+  score?: number;
+  url?: string;
+}
+
+interface Accuracy {
+  score: number;
+  label: string;
+  reason: string;
+}
+
+interface JurisdictionOption {
+  name: string;
+  chunks: number;
 }
 
 interface RAGResult {
   answer: string;
   sources?: Source[];
+  accuracy?: Accuracy;
   error?: boolean;
   duration?: number;
 }
@@ -18,10 +36,27 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [llamaResult, setLlamaResult] = useState<RAGResult | null>(null);
   const [customResult, setCustomResult] = useState<RAGResult | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
+  const [jurisdictionFilter, setJurisdictionFilter] = useState("");
   const [loadingLlama, setLoadingLlama] = useState(false);
   const [loadingCustom, setLoadingCustom] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    fetch("http://localhost:8001/jurisdictions")
+      .then((r) => r.json())
+      .then((data) => {
+        setJurisdictions(Array.isArray(data.jurisdictions) ? data.jurisdictions : []);
+      })
+      .catch(() => {
+        setJurisdictions([]);
+      });
+  }, []);
 
   const runQuery = async () => {
     if (!query.trim() || loadingLlama || loadingCustom) return;
@@ -34,9 +69,13 @@ export default function Home() {
 
     const llamaStart = Date.now();
     const customStart = Date.now();
+    const queryParams = new URLSearchParams({ q: query });
+    if (jurisdictionFilter) {
+      queryParams.set("jurisdiction", jurisdictionFilter);
+    }
 
     const llamaPromise = fetch(
-      "http://localhost:8000/query?q=" + encodeURIComponent(query)
+      "http://localhost:8000/query?" + queryParams.toString()
     )
       .then((r) => r.json())
       .then((data) => ({ answer: data.answer, duration: Date.now() - llamaStart }))
@@ -47,10 +86,15 @@ export default function Home() {
       }));
 
     const customPromise = fetch(
-      "http://localhost:8001/query?q=" + encodeURIComponent(query)
+      "http://localhost:8001/query?" + queryParams.toString()
     )
       .then((r) => r.json())
-      .then((data) => ({ answer: data.answer, sources: data.sources, duration: Date.now() - customStart }))
+      .then((data) => ({
+        answer: data.answer,
+        sources: data.sources,
+        accuracy: data.accuracy,
+        duration: Date.now() - customStart,
+      }))
       .catch(() => ({
         answer: "Failed to reach the Custom RAG backend (port 8001).",
         error: true,
@@ -59,6 +103,43 @@ export default function Home() {
 
     llamaPromise.then((result) => { setLlamaResult(result); setLoadingLlama(false); });
     customPromise.then((result) => { setCustomResult(result); setLoadingCustom(false); });
+  };
+
+  const uploadPdf = async () => {
+    if (!uploadFile || uploading) return;
+
+    const formData = new FormData();
+    formData.append("file", uploadFile);
+
+    setUploading(true);
+    setUploadMessage(null);
+    setUploadError(null);
+
+    try {
+      const response = await fetch("http://localhost:8001/upload-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Upload failed.");
+      }
+
+      setUploadMessage(`Saved ${data.filename} to the ordinance PDF folder.`);
+      setUploadFile(null);
+      fetch("http://localhost:8001/jurisdictions")
+        .then((r) => r.json())
+        .then((data) => {
+          setJurisdictions(Array.isArray(data.jurisdictions) ? data.jurisdictions : []);
+        })
+        .catch(() => {});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed.";
+      setUploadError(message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -133,6 +214,26 @@ export default function Home() {
 
         /* QUERY */
         .query-label { font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; display: block; }
+        .filter-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+          flex-wrap: wrap;
+        }
+        .filter-copy { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+        .filter-select {
+          min-width: 240px;
+          padding: 10px 12px;
+          border-radius: 2px;
+          border: 1px solid var(--border-strong);
+          background: var(--surface);
+          color: var(--text);
+          font-family: var(--mono);
+          font-size: 11px;
+          letter-spacing: 0.04em;
+        }
         .textarea-wrap {
           border: 1px solid var(--border-strong); border-radius: 3px;
           background: var(--surface); overflow: hidden; transition: border-color 0.2s; margin-bottom: 32px;
@@ -156,11 +257,35 @@ export default function Home() {
         .btn-primary { background: var(--amber); border-color: var(--amber); color: #0d0f0e; }
         .btn-primary:hover:not(:disabled) { background: #fcd34d; }
         .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-upload { background: transparent; border-color: var(--custom-dim); color: var(--custom-accent); }
+        .btn-upload:hover:not(:disabled) { border-color: var(--custom-accent); color: #bfdbfe; }
 
         /* GRID */
         .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; opacity: 0; transform: translateY(10px); transition: opacity 0.35s, transform 0.35s; }
         .compare-grid.visible { opacity: 1; transform: none; }
         @media (max-width: 720px) { .compare-grid { grid-template-columns: 1fr; } }
+
+        /* UPLOAD */
+        .upload-panel {
+          margin-bottom: 28px;
+          border: 1px solid var(--border);
+          border-radius: 3px;
+          background: linear-gradient(180deg, rgba(96,165,250,0.05), rgba(20,23,22,0.95));
+          padding: 16px;
+        }
+        .upload-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+        .upload-title { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--custom-accent); margin-bottom: 6px; }
+        .upload-copy { font-size: 12px; line-height: 1.7; color: var(--text-dim); max-width: 700px; }
+        .upload-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .file-input {
+          color: var(--text-dim);
+          font-family: var(--mono);
+          font-size: 11px;
+          max-width: 100%;
+        }
+        .upload-feedback { margin-top: 10px; font-size: 11px; line-height: 1.6; }
+        .upload-feedback.success { color: var(--custom-accent); }
+        .upload-feedback.error { color: #f87171; }
 
         /* CARD */
         .result-card { border: 1px solid var(--border); border-radius: 3px; background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
@@ -189,7 +314,15 @@ export default function Home() {
         .sources-footer { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface-2); }
         .sources-label { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
         .sources-list { display: flex; flex-wrap: wrap; gap: 6px; }
-        .source-chip { padding: 3px 9px; border: 1px solid var(--custom-dim); border-radius: 2px; font-size: 10px; color: var(--custom-accent); letter-spacing: 0.05em; background: var(--custom-glow); }
+        .source-chip { padding: 3px 9px; border: 1px solid var(--custom-dim); border-radius: 2px; font-size: 10px; color: var(--custom-accent); letter-spacing: 0.05em; background: var(--custom-glow); text-decoration: none; transition: border-color 0.15s, transform 0.15s; display: inline-flex; align-items: center; }
+        .source-chip:hover { border-color: var(--custom-accent); transform: translateY(-1px); }
+        .accuracy-wrap { padding: 12px 16px; border-top: 1px solid var(--border); background: rgba(96,165,250,0.04); }
+        .accuracy-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+        .accuracy-label { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-dim); }
+        .accuracy-score { font-size: 11px; color: var(--custom-accent); letter-spacing: 0.1em; text-transform: uppercase; }
+        .accuracy-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; margin-bottom: 8px; }
+        .accuracy-fill { height: 100%; background: linear-gradient(90deg, #38bdf8 0%, #60a5fa 100%); }
+        .accuracy-reason { font-size: 11px; line-height: 1.6; color: var(--text-dim); }
 
         /* DIFF BAR */
         .diff-bar { margin-top: 16px; padding: 12px 18px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-dim); letter-spacing: 0.05em; opacity: 0; transition: opacity 0.4s 0.2s; }
@@ -214,6 +347,56 @@ export default function Home() {
               <span className="badge badge-custom">Custom RAG · :8001</span>
             </div>
           </header>
+
+          <div className="upload-panel">
+            <div className="upload-head">
+              <div>
+                <div className="upload-title">Upload Ordinance PDF</div>
+                <div className="upload-copy">
+                  Add a municipal ordinance PDF to the shared source folder. Uploaded files are saved into the backend
+                  `Data/PDF` directory, parsed automatically, and made available to both RAG systems.
+                </div>
+              </div>
+              <div className="upload-controls">
+                <input
+                  className="file-input"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => {
+                    const nextFile = e.target.files?.[0] ?? null;
+                    setUploadFile(nextFile);
+                    setUploadMessage(null);
+                    setUploadError(null);
+                  }}
+                />
+                <button
+                  className="btn btn-upload"
+                  onClick={uploadPdf}
+                  disabled={!uploadFile || uploading}
+                >
+                  {uploading ? "Uploading…" : "Upload PDF"}
+                </button>
+              </div>
+            </div>
+            {uploadMessage && <div className="upload-feedback success">{uploadMessage}</div>}
+            {uploadError && <div className="upload-feedback error">{uploadError}</div>}
+          </div>
+
+          <div className="filter-row">
+            <span className="filter-copy">Code Focus</span>
+            <select
+              className="filter-select"
+              value={jurisdictionFilter}
+              onChange={(e) => setJurisdictionFilter(e.target.value)}
+            >
+              <option value="">All indexed codes</option>
+              {jurisdictions.map((jurisdiction) => (
+                <option key={jurisdiction.name} value={jurisdiction.name}>
+                  {jurisdiction.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <span className="query-label">Query</span>
           <div className="textarea-wrap">
@@ -247,11 +430,14 @@ export default function Home() {
               <div className="card-header">
                 <div className="card-title">
                   <div className="card-dot" />
-                  <div>
-                    <div className="card-name">LlamaIndex RAG</div>
-                    <div className="card-sub">VectorStoreIndex · all-MiniLM-L6-v2 · DeepSeek V3</div>
+                    <div>
+                      <div className="card-name">LlamaIndex RAG</div>
+                      <div className="card-sub">
+                        VectorStoreIndex · all-MiniLM-L6-v2 · DeepSeek V3
+                        {jurisdictionFilter ? ` · filtered to ${jurisdictionFilter}` : ""}
+                      </div>
+                    </div>
                   </div>
-                </div>
                 {llamaResult?.duration !== undefined && (
                   <span className="duration-tag">{(llamaResult.duration / 1000).toFixed(2)}s</span>
                 )}
@@ -275,11 +461,14 @@ export default function Home() {
               <div className="card-header">
                 <div className="card-title">
                   <div className="card-dot" />
-                  <div>
-                    <div className="card-name">Custom RAG</div>
-                    <div className="card-sub">Hybrid Search · top_k=5</div>
+                    <div>
+                      <div className="card-name">Custom RAG</div>
+                      <div className="card-sub">
+                        Hybrid Search · top_k=5
+                        {jurisdictionFilter ? ` · filtered to ${jurisdictionFilter}` : ""}
+                      </div>
+                    </div>
                   </div>
-                </div>
                 {customResult?.duration !== undefined && (
                   <span className="duration-tag">{(customResult.duration / 1000).toFixed(2)}s</span>
                 )}
@@ -294,16 +483,46 @@ export default function Home() {
                   <div className={`card-body ${customResult.error ? "error" : ""}`}>
                     {customResult.answer}
                   </div>
+                  {customResult.accuracy && !customResult.error && (
+                    <div className="accuracy-wrap">
+                      <div className="accuracy-head">
+                        <div className="accuracy-label">Accuracy Estimate</div>
+                        <div className="accuracy-score">
+                          {customResult.accuracy.score}% · {customResult.accuracy.label}
+                        </div>
+                      </div>
+                      <div className="accuracy-bar">
+                        <div
+                          className="accuracy-fill"
+                          style={{ width: `${customResult.accuracy.score}%` }}
+                        />
+                      </div>
+                      <div className="accuracy-reason">{customResult.accuracy.reason}</div>
+                    </div>
+                  )}
                   {customResult.sources && customResult.sources.filter(s => s.section || s.subsection).length > 0 && (
                     <div className="sources-footer">
-                      <div className="sources-label">Retrieved Sources</div>
+                      <div className="sources-label">Retrieved Sources For This Query</div>
                       <div className="sources-list">
                         {customResult.sources
                           .filter(s => s.section || s.subsection)
                           .map((s, i) => (
-                            <span key={i} className="source-chip">
+                            <a
+                              key={i}
+                              className="source-chip"
+                              href={s.url ?? "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={[
+                                s.jurisdiction,
+                                s.source,
+                                s.title,
+                                s.page ? `Page ${s.page}` : undefined,
+                              ].filter(Boolean).join(" · ")}
+                            >
                               {[s.section, s.subsection].filter(Boolean).join(" › ")}
-                            </span>
+                              {s.page ? ` · p.${s.page}` : ""}
+                            </a>
                           ))}
                       </div>
                     </div>
