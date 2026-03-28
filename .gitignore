@@ -1,0 +1,19 @@
+# AI / Data
+Data/
+storage/
+FAISS/
+chroma_db/
+
+# Python ENV (VERY IMPORTANT)
+.venv/
+env/
+venv/
+
+# Large files
+*.pkl
+*.index
+*.sqlite3
+
+# Python cache
+__pycache__/
+*.pyc
