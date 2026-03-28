@@ -24,5 +24,5 @@ llm = OpenAILike(
     max_tokens=1024,
 )
 
-STORAGE_DIR = "./storage"
+STORAGE_DIR = "./llamaIndexRAG/storage"
 PDF_DIR     = "./Data/PDF"
