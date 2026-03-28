@@ -8,7 +8,7 @@ chroma_db/
 .venv/
 env/
 venv/
-
+.env
 # Large files
 *.pkl
 *.index
