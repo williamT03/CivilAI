@@ -5,7 +5,7 @@ from typing import Optional
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from CustomRAG.rag import ask
+from CustomRAG.LLM.rag import ask
 
 app = FastAPI(title="Civil AI — Custom RAG")
 
@@ -45,7 +45,7 @@ def query(
 @app.get("/jurisdictions")
 def list_jurisdictions():
     """Returns all indexed jurisdictions."""
-    from retrieval import _JURISDICTION_IDX
+    from CustomRAG.retrieval import _JURISDICTION_IDX
     return {
         "jurisdictions": [
             {"name": name, "chunks": len(indices)}
