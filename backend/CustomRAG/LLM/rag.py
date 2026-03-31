@@ -2,13 +2,17 @@ import sys
 import os
 import re
 from urllib.parse import quote
+from dotenv import load_dotenv
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from retrieval import hybrid_search, detect_section_filter, resolve_jurisdiction
 from LLM.llm import generate_answer
 
-CUSTOM_RAG_BASE_URL = "http://localhost:8001"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+CUSTOM_RAG_BASE_URL = os.getenv("CUSTOM_RAG_BASE_URL", "http://localhost:8001")
 
 
 def _tokenize_query(text: str) -> list[str]:

@@ -1,0 +1,15 @@
+fastapi==0.135.2
+uvicorn[standard]==0.42.0
+sentence-transformers==5.3.0
+rank-bm25==0.2.2
+numpy==2.4.3
+faiss-cpu==1.13.2
+chromadb==1.5.5
+PyMuPDF==1.27.2.2
+pdfplumber==0.11.9
+requests==2.32.5
+python-multipart==0.0.22
+python-dotenv==1.2.2
+llama-index-core==0.14.18
+llama-index-embeddings-huggingface==0.7.0
+llama-index-llms-openai-like==0.7.1

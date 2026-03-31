@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
+const CUSTOM_API_BASE = process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? "http://localhost:8001";
+const LLAMA_API_BASE = process.env.NEXT_PUBLIC_LLAMA_API_BASE ?? "http://localhost:8000";
+
 interface Source {
   jurisdiction?: string;
   source?: string;
@@ -48,7 +51,7 @@ export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8001/jurisdictions")
+    fetch(`${CUSTOM_API_BASE}/jurisdictions`)
       .then((r) => r.json())
       .then((data) => {
         setJurisdictions(Array.isArray(data.jurisdictions) ? data.jurisdictions : []);
@@ -75,7 +78,7 @@ export default function Home() {
     }
 
     const llamaPromise = fetch(
-      "http://localhost:8000/query?" + queryParams.toString()
+      `${LLAMA_API_BASE}/query?${queryParams.toString()}`
     )
       .then((r) => r.json())
       .then((data) => ({ answer: data.answer, duration: Date.now() - llamaStart }))
@@ -86,7 +89,7 @@ export default function Home() {
       }));
 
     const customPromise = fetch(
-      "http://localhost:8001/query?" + queryParams.toString()
+      `${CUSTOM_API_BASE}/query?${queryParams.toString()}`
     )
       .then((r) => r.json())
       .then((data) => ({
@@ -116,7 +119,7 @@ export default function Home() {
     setUploadError(null);
 
     try {
-      const response = await fetch("http://localhost:8001/upload-pdf", {
+      const response = await fetch(`${CUSTOM_API_BASE}/upload-pdf`, {
         method: "POST",
         body: formData,
       });
@@ -128,7 +131,7 @@ export default function Home() {
 
       setUploadMessage(`Saved ${data.filename} to the ordinance PDF folder.`);
       setUploadFile(null);
-      fetch("http://localhost:8001/jurisdictions")
+      fetch(`${CUSTOM_API_BASE}/jurisdictions`)
         .then((r) => r.json())
         .then((data) => {
           setJurisdictions(Array.isArray(data.jurisdictions) ? data.jurisdictions : []);

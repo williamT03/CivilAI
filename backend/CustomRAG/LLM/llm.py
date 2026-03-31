@@ -1,8 +1,13 @@
 import requests
 import textwrap
+import os
+from dotenv import load_dotenv
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL      = "llama3"   # swap for mistral, phi3, etc. — must be pulled via `ollama pull`
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+MODEL      = os.getenv("OLLAMA_MODEL", "llama3")   # swap for mistral, phi3, etc.
 
 # llama3 has an 8k-token window (~4 chars/token → ~32k chars).
 # Leave ~2k chars for the prompt wrapper and model's answer.
