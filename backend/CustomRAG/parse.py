@@ -46,7 +46,11 @@ PROCESSED_FILE   = os.path.join(DATA_DIR, "processed_files.json")
 REQUIRED_ARTIFACTS = [FAISS_INDEX_PATH, FAISS_META_PATH, BM25_PATH]
 
 DIMENSION   = 384
-MAX_WORKERS = 4
+MAX_WORKERS = int(os.getenv("PARSE_MAX_WORKERS", "1"))
+EMBED_BATCH_SIZE = int(os.getenv("PARSE_EMBED_BATCH_SIZE", "8"))
+CHROMA_BATCH_SIZE = int(os.getenv("PARSE_CHROMA_BATCH_SIZE", "1000"))
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -410,7 +414,7 @@ def process_pdf(path: str, filename: str, file_hash: str):
     store_texts = [c["body"]       for c in chunks]
 
     embeddings = embedding_model.encode(
-        embed_texts, batch_size=32, show_progress_bar=False
+        embed_texts, batch_size=EMBED_BATCH_SIZE, show_progress_bar=False
     ).astype("float32")
     faiss.normalize_L2(embeddings)
 
@@ -449,6 +453,8 @@ if storage_ready:
     faiss_index    = faiss.read_index(FAISS_INDEX_PATH)
     with open(FAISS_META_PATH, "rb") as f:
         faiss_metadata = pickle.load(f)
+    with open(BM25_PATH, "rb") as f:
+        bm25_corpus, bm25_texts = pickle.load(f)
 else:
     missing = [path for path in REQUIRED_ARTIFACTS if not os.path.exists(path)]
     if missing:
@@ -456,58 +462,80 @@ else:
         print("   Missing storage artifacts detected; rebuilding index files.")
     faiss_index    = faiss.IndexHNSWFlat(DIMENSION, 32)
     faiss_metadata = []
+    bm25_texts  = []
+    bm25_corpus = []
 
-bm25_texts  = []
-bm25_corpus = []
+
+def store_result(store_texts, embs, metas, ids, tokens) -> int:
+    embs = np.asarray(embs, dtype="float32")
+    faiss_index.add(embs)
+
+    for t, m, tok in zip(store_texts, metas, tokens):
+        faiss_metadata.append({"text": t, "meta": m})
+        bm25_texts.append(t)
+        bm25_corpus.append(tok)
+
+    for i in range(0, len(store_texts), CHROMA_BATCH_SIZE):
+        collection.upsert(
+            documents=store_texts[i:i + CHROMA_BATCH_SIZE],
+            embeddings=embs[i:i + CHROMA_BATCH_SIZE].tolist(),
+            metadatas=metas[i:i + CHROMA_BATCH_SIZE],
+            ids=ids[i:i + CHROMA_BATCH_SIZE],
+        )
+
+    return len(store_texts)
 
 # ─────────────────────────────────────────────────────────────
 # INGESTION LOOP
 # ─────────────────────────────────────────────────────────────
 processed  = load_processed() if storage_ready else {}
-results    = []
 new_hashes: dict[str, str] = {}
+indexed_files = 0
+total_chunks = 0
 
-with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-    futures: dict = {}
-    for file in sorted(os.listdir(PDF_PATH)):
-        if not file.lower().endswith(".pdf"):
-            continue
-        path = os.path.join(PDF_PATH, file)
-        h    = get_file_hash(path)
-        if h in processed:
-            print(f"  SKIP: {file} (already indexed)")
-            continue
-        futures[ex.submit(process_pdf, path, file, h)] = (h, file)
+pending_files = []
+for file in sorted(os.listdir(PDF_PATH)):
+    if not file.lower().endswith(".pdf"):
+        continue
+    path = os.path.join(PDF_PATH, file)
+    h    = get_file_hash(path)
+    if h in processed:
+        print(f"  SKIP: {file} (already indexed)")
+        continue
+    pending_files.append((path, file, h))
 
-    for future in as_completed(futures):
-        h, fname = futures[future]
+if MAX_WORKERS <= 1:
+    for path, file, h in pending_files:
         try:
-            result = future.result()
+            result = process_pdf(path, file, h)
             if result[0]:
-                results.append(result)
-                new_hashes[h] = fname
+                total_chunks += store_result(*result)
+                new_hashes[h] = file
+                indexed_files += 1
         except Exception as e:
-            print(f"  ERROR: {fname}: {e}")
+            print(f"  ERROR: {file}: {e}")
+else:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futures: dict = {
+            ex.submit(process_pdf, path, file, h): (h, file)
+            for path, file, h in pending_files
+        }
+
+        for future in as_completed(futures):
+            h, fname = futures[future]
+            try:
+                result = future.result()
+                if result[0]:
+                    total_chunks += store_result(*result)
+                    new_hashes[h] = fname
+                    indexed_files += 1
+            except Exception as e:
+                print(f"  ERROR: {fname}: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # STORE & SAVE
 # ─────────────────────────────────────────────────────────────
-for store_texts, embs, metas, ids, tokens in results:
-    embs = np.array(embs).astype("float32")
-    faiss_index.add(embs)
-    for t, m, tok in zip(store_texts, metas, tokens):
-        faiss_metadata.append({"text": t, "meta": m})
-        bm25_texts.append(t)
-        bm25_corpus.append(tok)
-    for i in range(0, len(store_texts), 4000):
-        collection.upsert(
-            documents=store_texts[i:i+4000],
-            embeddings=embs[i:i+4000].tolist(),
-            metadatas=metas[i:i+4000],
-            ids=ids[i:i+4000],
-        )
-
-if results:
+if indexed_files:
     faiss.write_index(faiss_index, FAISS_INDEX_PATH)
     with open(FAISS_META_PATH, "wb") as f:
         pickle.dump(faiss_metadata, f)
@@ -516,8 +544,7 @@ if results:
         pickle.dump((bm25_corpus, bm25_texts), f)
     processed.update(new_hashes)
     save_processed(processed)
-    total_chunks = sum(len(r[0]) for r in results)
-    print(f"\nIndexed {len(results)} new file(s) - "
+    print(f"\nIndexed {indexed_files} new file(s) - "
           f"{total_chunks:,} new chunks - "
           f"{faiss_index.ntotal:,} total vectors")
 else:
