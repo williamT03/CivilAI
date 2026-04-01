@@ -20,6 +20,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PDF_DIR = os.path.join(PROJECT_ROOT, "Data", "PDF")
 PROCESSED_FILE = os.path.join(PROJECT_ROOT, "Data", "processed_files.json")
 INDEX_LOCK = threading.Lock()
+ENABLE_LLAMA_SERVER = os.getenv("ENABLE_LLAMA_SERVER", "false").lower() == "true"
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +64,12 @@ def _run_index_command(script_path: str, label: str) -> None:
             status_code=500,
             detail=f"{label} failed. {details}" if details else f"{label} failed.",
         )
+
+
+def _run_optional_llama_index() -> None:
+    if not ENABLE_LLAMA_SERVER:
+        return
+    _run_index_command(os.path.join("LlamaIndexRAG", "build_index.py"), "LlamaIndex indexing")
 
 
 @app.get("/query")
@@ -135,7 +142,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     with INDEX_LOCK:
         _run_index_command(os.path.join("CustomRAG", "parse.py"), "Custom RAG indexing")
-        _run_index_command(os.path.join("LlamaIndexRAG", "build_index.py"), "LlamaIndex indexing")
+        _run_optional_llama_index()
 
     return {
         "message": "PDF uploaded and indexed successfully.",
