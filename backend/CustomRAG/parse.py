@@ -20,6 +20,7 @@ import json
 import pickle
 import hashlib
 import re
+import gc
 import numpy as np
 import faiss
 import chromadb
@@ -49,8 +50,14 @@ DIMENSION   = 384
 MAX_WORKERS = int(os.getenv("PARSE_MAX_WORKERS", "1"))
 EMBED_BATCH_SIZE = int(os.getenv("PARSE_EMBED_BATCH_SIZE", "8"))
 CHROMA_BATCH_SIZE = int(os.getenv("PARSE_CHROMA_BATCH_SIZE", "1000"))
+EMBED_CHUNK_GROUP_SIZE = int(os.getenv("PARSE_EMBED_CHUNK_GROUP_SIZE", "128"))
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+try:
+    faiss.omp_set_num_threads(int(os.getenv("FAISS_NUM_THREADS", "1")))
+except Exception:
+    pass
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -403,38 +410,14 @@ def process_pdf(path: str, filename: str, file_hash: str):
     raw_pages  = load_pdf(path, profile)
     structured = structure_parse(raw_pages, profile)
     chunks     = chunk_sections(structured, profile, jurisdiction)
+    del raw_pages, structured
 
     if not chunks:
         print("  WARNING: No chunks extracted - check profile regex")
-        return [], np.array([]), [], [], []
+        return []
 
     print(f"     Chunks      : {len(chunks):,}")
-
-    embed_texts = [c["embed_text"] for c in chunks]
-    store_texts = [c["body"]       for c in chunks]
-
-    embeddings = embedding_model.encode(
-        embed_texts, batch_size=EMBED_BATCH_SIZE, show_progress_bar=False
-    ).astype("float32")
-    faiss.normalize_L2(embeddings)
-
-    metas  = []
-    ids    = []
-    tokens = []
-
-    for i, c in enumerate(chunks):
-        metas.append({
-            "source":       filename,
-            "jurisdiction": jurisdiction,
-            "section":      c["section"],
-            "subsection":   c["subsection"],
-            "title":        extract_section_title(c["body"]),
-            "page":         c["page"],
-        })
-        ids.append(f"{file_hash}_{i}")
-        tokens.append(tokenize(embed_texts[i]))   # BM25 on prefixed text
-
-    return store_texts, embeddings, metas, ids, tokens
+    return chunks
 
 # ─────────────────────────────────────────────────────────────
 # STORAGE INIT
@@ -485,6 +468,53 @@ def store_result(store_texts, embs, metas, ids, tokens) -> int:
 
     return len(store_texts)
 
+
+def store_chunks_for_pdf(chunks: list[dict], filename: str, file_hash: str) -> int:
+    total = 0
+
+    for start in range(0, len(chunks), EMBED_CHUNK_GROUP_SIZE):
+        batch = chunks[start:start + EMBED_CHUNK_GROUP_SIZE]
+        embed_texts = [c["embed_text"] for c in batch]
+        store_texts = [c["body"] for c in batch]
+        metas = [
+            {
+                "source": filename,
+                "jurisdiction": c["jurisdiction"],
+                "section": c["section"],
+                "subsection": c["subsection"],
+                "title": extract_section_title(c["body"]),
+                "page": c["page"],
+            }
+            for c in batch
+        ]
+        ids = [f"{file_hash}_{start + i}" for i in range(len(batch))]
+        tokens = [tokenize(text) for text in embed_texts]
+
+        embeddings = embedding_model.encode(
+            embed_texts,
+            batch_size=min(EMBED_BATCH_SIZE, len(embed_texts)),
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        ).astype("float32", copy=False)
+        faiss.normalize_L2(embeddings)
+
+        total += store_result(store_texts, embeddings, metas, ids, tokens)
+
+        del batch, embed_texts, store_texts, metas, ids, tokens, embeddings
+        gc.collect()
+
+    return total
+
+
+def persist_state(processed: dict) -> None:
+    faiss.write_index(faiss_index, FAISS_INDEX_PATH)
+    with open(FAISS_META_PATH, "wb") as f:
+        pickle.dump(faiss_metadata, f)
+    bm25 = BM25Okapi(bm25_corpus)
+    with open(BM25_PATH, "wb") as f:
+        pickle.dump((bm25_corpus, bm25_texts), f)
+    save_processed(processed)
+
 # ─────────────────────────────────────────────────────────────
 # INGESTION LOOP
 # ─────────────────────────────────────────────────────────────
@@ -508,10 +538,14 @@ if MAX_WORKERS <= 1:
     for path, file, h in pending_files:
         try:
             result = process_pdf(path, file, h)
-            if result[0]:
-                total_chunks += store_result(*result)
+            if result:
+                total_chunks += store_chunks_for_pdf(result, file, h)
                 new_hashes[h] = file
+                processed[h] = file
+                persist_state(processed)
                 indexed_files += 1
+                del result
+                gc.collect()
         except Exception as e:
             print(f"  ERROR: {file}: {e}")
 else:
@@ -525,10 +559,14 @@ else:
             h, fname = futures[future]
             try:
                 result = future.result()
-                if result[0]:
-                    total_chunks += store_result(*result)
+                if result:
+                    total_chunks += store_chunks_for_pdf(result, fname, h)
                     new_hashes[h] = fname
+                    processed[h] = fname
+                    persist_state(processed)
                     indexed_files += 1
+                    del result
+                    gc.collect()
             except Exception as e:
                 print(f"  ERROR: {fname}: {e}")
 
@@ -536,14 +574,7 @@ else:
 # STORE & SAVE
 # ─────────────────────────────────────────────────────────────
 if indexed_files:
-    faiss.write_index(faiss_index, FAISS_INDEX_PATH)
-    with open(FAISS_META_PATH, "wb") as f:
-        pickle.dump(faiss_metadata, f)
-    bm25 = BM25Okapi(bm25_corpus)
-    with open(BM25_PATH, "wb") as f:
-        pickle.dump((bm25_corpus, bm25_texts), f)
-    processed.update(new_hashes)
-    save_processed(processed)
+    persist_state(processed)
     print(f"\nIndexed {indexed_files} new file(s) - "
           f"{total_chunks:,} new chunks - "
           f"{faiss_index.ntotal:,} total vectors")
