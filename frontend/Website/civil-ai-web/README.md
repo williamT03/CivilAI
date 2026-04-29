@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Civil AI Web
 
-## Getting Started
+This frontend is a static Next.js app that talks to the Civil AI backend over HTTP.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Set environment variables in `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+NEXT_PUBLIC_CUSTOM_API_BASE=http://localhost:8001
+NEXT_PUBLIC_LLAMA_API_BASE=http://localhost:8000
+NEXT_PUBLIC_ENABLE_LLAMA=false
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Cloudflare deployment
 
-## Learn More
+Deploy this app from the `frontend/Website/civil-ai-web` directory, not the repository root.
 
-To learn more about Next.js, take a look at the following resources:
+Use these Cloudflare Pages settings:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Framework preset: `Next.js (Static HTML Export)`
+- Root directory: `frontend/Website/civil-ai-web`
+- Build command: `npx next build`
+- Build output directory: `out`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Set these environment variables in Cloudflare Pages:
 
-## Deploy on Vercel
+```env
+NEXT_PUBLIC_CUSTOM_API_BASE=https://your-backend-domain/api/custom
+NEXT_PUBLIC_LLAMA_API_BASE=https://your-backend-domain/api/llama
+NEXT_PUBLIC_ENABLE_LLAMA=false
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Notes
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- The backend must stay on your server. Cloudflare Pages only hosts the frontend.
+- PDF uploads and retrieval still go through the backend API.
+- Use a public `https://...` backend URL. A private LAN IP such as `192.168.x.x` or a plain `http://...` endpoint will not work from the public Cloudflare site.
+- Turn `NEXT_PUBLIC_ENABLE_LLAMA=true` only if `/api/llama` is actually live on the backend.

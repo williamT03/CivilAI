@@ -49,11 +49,16 @@ def build_context(results: list[dict], max_chars: int = MAX_CONTEXT_CHARS) -> st
 
 
 # -----------------------------
-# PROMPT  (tuned to Cooper City Code structure)
+# PROMPT
 # -----------------------------
-def build_prompt(query: str, context: str) -> str:
+def build_prompt(query: str, context: str, jurisdiction_label: str | None = None) -> str:
+    if jurisdiction_label:
+        assistant_scope = f"a civil engineering and municipal law assistant for {jurisdiction_label}"
+    else:
+        assistant_scope = "a civil engineering and municipal law assistant for municipal code research"
+
     return textwrap.dedent(f"""\
-        You are a civil engineering and municipal law assistant for Cooper City, Florida.
+        You are {assistant_scope}.
 
         Answer the question using ONLY the provided Code of Ordinances context below.
 
@@ -100,7 +105,7 @@ def call_ollama(prompt: str, timeout: int = 120) -> str:
     except requests.exceptions.Timeout:
         return "Error: Ollama request timed out. Is `ollama serve` running?"
     except requests.exceptions.ConnectionError:
-        return "Error: Cannot connect to Ollama at localhost:11434."
+        return f"Error: Cannot connect to Ollama at {OLLAMA_URL}."
     except (KeyError, ValueError) as e:
         return f"Error: Unexpected Ollama response — {e}"
     except requests.exceptions.HTTPError as e:
@@ -114,6 +119,13 @@ def generate_answer(query: str, retrieval_results: list[dict]) -> str:
     if not retrieval_results:
         return "No relevant sections retrieved from the municipal code."
 
+    jurisdictions = {
+        r["meta"].get("jurisdiction")
+        for r in retrieval_results
+        if r.get("meta", {}).get("jurisdiction")
+    }
+    jurisdiction_label = next(iter(jurisdictions)) if len(jurisdictions) == 1 else None
+
     context = build_context(retrieval_results)
-    prompt  = build_prompt(query, context)
+    prompt  = build_prompt(query, context, jurisdiction_label=jurisdiction_label)
     return call_ollama(prompt)

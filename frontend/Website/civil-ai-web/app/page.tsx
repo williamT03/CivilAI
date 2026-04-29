@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 const CUSTOM_API_BASE = process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? "http://localhost:8001";
 const LLAMA_API_BASE = process.env.NEXT_PUBLIC_LLAMA_API_BASE ?? "http://localhost:8000";
+const ENABLE_LLAMA = (process.env.NEXT_PUBLIC_ENABLE_LLAMA ?? "false").toLowerCase() === "true";
 
 interface Source {
   jurisdiction?: string;
@@ -67,26 +68,28 @@ export default function Home() {
     setSubmitted(true);
     setLlamaResult(null);
     setCustomResult(null);
-    setLoadingLlama(true);
+    setLoadingLlama(ENABLE_LLAMA);
     setLoadingCustom(true);
 
-    const llamaStart = Date.now();
     const customStart = Date.now();
     const queryParams = new URLSearchParams({ q: query });
     if (jurisdictionFilter) {
       queryParams.set("jurisdiction", jurisdictionFilter);
     }
 
-    const llamaPromise = fetch(
-      `${LLAMA_API_BASE}/query?${queryParams.toString()}`
-    )
-      .then((r) => r.json())
-      .then((data) => ({ answer: data.answer, duration: Date.now() - llamaStart }))
-      .catch(() => ({
-        answer: "Failed to reach the LlamaIndex backend (port 8000).",
-        error: true,
-        duration: Date.now() - llamaStart,
-      }));
+    const llamaPromise = ENABLE_LLAMA
+      ? (() => {
+          const llamaStart = Date.now();
+          return fetch(`${LLAMA_API_BASE}/query?${queryParams.toString()}`)
+            .then((r) => r.json())
+            .then((data) => ({ answer: data.answer, duration: Date.now() - llamaStart }))
+            .catch(() => ({
+              answer: "Failed to reach the LlamaIndex backend.",
+              error: true,
+              duration: Date.now() - llamaStart,
+            }));
+        })()
+      : Promise.resolve(null);
 
     const customPromise = fetch(
       `${CUSTOM_API_BASE}/query?${queryParams.toString()}`
@@ -99,12 +102,17 @@ export default function Home() {
         duration: Date.now() - customStart,
       }))
       .catch(() => ({
-        answer: "Failed to reach the Custom RAG backend (port 8001).",
+        answer: "Failed to reach the Custom RAG backend.",
         error: true,
         duration: Date.now() - customStart,
       }));
 
-    llamaPromise.then((result) => { setLlamaResult(result); setLoadingLlama(false); });
+    llamaPromise.then((result) => {
+      if (result) {
+        setLlamaResult(result);
+      }
+      setLoadingLlama(false);
+    });
     customPromise.then((result) => { setCustomResult(result); setLoadingCustom(false); });
   };
 
@@ -157,7 +165,7 @@ export default function Home() {
     textareaRef.current?.focus();
   };
 
-  const bothDone = !loadingLlama && !loadingCustom && submitted;
+  const bothDone = !loadingCustom && (!ENABLE_LLAMA || !loadingLlama) && submitted;
 
   return (
     <>
@@ -265,6 +273,7 @@ export default function Home() {
 
         /* GRID */
         .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; opacity: 0; transform: translateY(10px); transition: opacity 0.35s, transform 0.35s; }
+        .compare-grid.single-column { grid-template-columns: 1fr; }
         .compare-grid.visible { opacity: 1; transform: none; }
         @media (max-width: 720px) { .compare-grid { grid-template-columns: 1fr; } }
 
@@ -343,11 +352,11 @@ export default function Home() {
           <header className="header">
             <div>
               <p className="eyebrow">Municipal Intelligence · RAG Evaluation</p>
-              <h1>Civil <span>AI</span> — System Compare</h1>
+              <h1>Civil <span>AI</span> — {ENABLE_LLAMA ? "System Compare" : "Custom RAG"}</h1>
             </div>
             <div className="badge-row">
-              <span className="badge badge-llama">LlamaIndex · :8000</span>
-              <span className="badge badge-custom">Custom RAG · :8001</span>
+              {ENABLE_LLAMA && <span className="badge badge-llama">LlamaIndex</span>}
+              <span className="badge badge-custom">Custom RAG</span>
             </div>
           </header>
 
@@ -357,7 +366,7 @@ export default function Home() {
                 <div className="upload-title">Upload Ordinance PDF</div>
                 <div className="upload-copy">
                   Add a municipal ordinance PDF to the shared source folder. Uploaded files are saved into the backend
-                  `Data/PDF` directory, parsed automatically, and made available to both RAG systems.
+                  `Data/PDF` directory, parsed automatically, and made available to the live retrieval index.
                 </div>
               </div>
               <div className="upload-controls">
@@ -411,7 +420,7 @@ export default function Home() {
               onKeyDown={handleKeyDown}
             />
             <div className="query-footer">
-              <span className="hint">⌘ + Enter to run both systems</span>
+              <span className="hint">Ctrl/Cmd + Enter to run {ENABLE_LLAMA ? "both systems" : "the query"}</span>
               <div className="btn-row">
                 {submitted && (
                   <button className="btn btn-ghost" onClick={handleClear}>Clear</button>
@@ -421,43 +430,45 @@ export default function Home() {
                   onClick={runQuery}
                   disabled={!query.trim() || loadingLlama || loadingCustom}
                 >
-                  {loadingLlama || loadingCustom ? "Running…" : "Run Comparison →"}
+                  {loadingLlama || loadingCustom ? "Running…" : ENABLE_LLAMA ? "Run Comparison →" : "Run Query →"}
                 </button>
               </div>
             </div>
           </div>
 
-          <div className={`compare-grid ${submitted ? "visible" : ""}`}>
+          <div className={`compare-grid ${submitted ? "visible" : ""} ${ENABLE_LLAMA ? "" : "single-column"}`}>
             {/* LlamaIndex */}
-            <div className="result-card llama">
-              <div className="card-header">
-                <div className="card-title">
-                  <div className="card-dot" />
-                    <div>
-                      <div className="card-name">LlamaIndex RAG</div>
-                      <div className="card-sub">
-                        VectorStoreIndex · all-MiniLM-L6-v2 · DeepSeek V3
-                        {jurisdictionFilter ? ` · filtered to ${jurisdictionFilter}` : ""}
+            {ENABLE_LLAMA && (
+              <div className="result-card llama">
+                <div className="card-header">
+                  <div className="card-title">
+                    <div className="card-dot" />
+                      <div>
+                        <div className="card-name">LlamaIndex RAG</div>
+                        <div className="card-sub">
+                          VectorStoreIndex · all-MiniLM-L6-v2 · DeepSeek V3
+                          {jurisdictionFilter ? ` · filtered to ${jurisdictionFilter}` : ""}
+                        </div>
                       </div>
                     </div>
+                  {llamaResult?.duration !== undefined && (
+                    <span className="duration-tag">{(llamaResult.duration / 1000).toFixed(2)}s</span>
+                  )}
+                </div>
+                {loadingLlama ? (
+                  <div className="loading-state">
+                    <div className="spinner" />
+                    Querying LlamaIndex index…
                   </div>
-                {llamaResult?.duration !== undefined && (
-                  <span className="duration-tag">{(llamaResult.duration / 1000).toFixed(2)}s</span>
+                ) : llamaResult ? (
+                  <div className={`card-body ${llamaResult.error ? "error" : ""}`}>
+                    {llamaResult.answer}
+                  </div>
+                ) : (
+                  <div className="card-body faint">Awaiting query…</div>
                 )}
               </div>
-              {loadingLlama ? (
-                <div className="loading-state">
-                  <div className="spinner" />
-                  Querying LlamaIndex index…
-                </div>
-              ) : llamaResult ? (
-                <div className={`card-body ${llamaResult.error ? "error" : ""}`}>
-                  {llamaResult.answer}
-                </div>
-              ) : (
-                <div className="card-body faint">Awaiting query…</div>
-              )}
-            </div>
+            )}
 
             {/* Custom RAG */}
             <div className="result-card custom">
@@ -538,7 +549,7 @@ export default function Home() {
           </div>
 
           {/* Speed diff */}
-          {bothDone && llamaResult && customResult && !llamaResult.error && !customResult.error && (
+          {ENABLE_LLAMA && bothDone && llamaResult && customResult && !llamaResult.error && !customResult.error && (
             <div className="diff-bar visible">
               ⚡&nbsp;
               {(() => {

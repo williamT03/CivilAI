@@ -1,0 +1,14 @@
+[Unit]
+Description=Civil AI Backend
+After=network.target
+
+[Service]
+User=YOUR_LINUX_USER
+WorkingDirectory=/home/YOUR_LINUX_USER/CivilAI
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/YOUR_LINUX_USER/CivilAI/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
