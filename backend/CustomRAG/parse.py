@@ -22,7 +22,7 @@ import hashlib
 import re
 import gc
 import numpy as np
-import faiss
+
 import chromadb
 
 from dataclasses import dataclass, field
@@ -32,6 +32,7 @@ from rank_bm25 import BM25Okapi
 
 import fitz          # PyMuPDF  — single-column PDFs
 import pdfplumber    # column-aware extraction for two-column layouts
+import faiss  
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
