@@ -16,7 +16,7 @@ import numpy as np
 
 # Reuse the normalized structural blueprint from DB.py so the relational and
 # vector layers always operate on the exact same in-memory hierarchy.
-from .DB import DatabaseManager, DocumentDefinition, DocumentSchemaBuilder
+from DB import DatabaseManager, DocumentDefinition, DocumentSchemaBuilder
 
 
 # ---------------------------------------------------------------------------

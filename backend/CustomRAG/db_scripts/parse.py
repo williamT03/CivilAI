@@ -14,8 +14,8 @@ import fitz
 
 # Reuse the normalized relational and vector storage layers built earlier.
 try:
-    from .DB import DatabaseManager
-    from .chroma import ChromaManager
+    from DB import DatabaseManager
+    from chroma import ChromaManager
 except ImportError:  # pragma: no cover - fallback for direct script execution
     import sys
 
