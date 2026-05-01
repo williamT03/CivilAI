@@ -1,25 +1,45 @@
-import sys
 import os
 import re
+import sys
 from urllib.parse import quote
+
 from dotenv import load_dotenv
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+CURRENT_DIR = os.path.dirname(__file__)
+CUSTOM_RAG_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+BACKEND_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
 
-from retrieval import hybrid_search, detect_section_filter, resolve_jurisdiction
-from LLM.llm import generate_answer
+for path in (CUSTOM_RAG_DIR, BACKEND_ROOT):
+    if path not in sys.path:
+        sys.path.append(path)
+
+try:
+    from CustomRAG.LLM.llm import generate_answer
+    from CustomRAG.tools import StructuredToolFactory
+except ImportError:
+    from LLM.llm import generate_answer
+    from tools import StructuredToolFactory
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 CUSTOM_RAG_BASE_URL = os.getenv("CUSTOM_RAG_BASE_URL", "http://localhost:8001")
+TOOLKIT = StructuredToolFactory.create_toolkit()
+
+
+# ---------------------------------------------------------------------------
+# Accuracy helpers
+# ---------------------------------------------------------------------------
+# The old stack estimated confidence from reranker output. The new stack relies
+# on a mix of exact tool hits, semantic score strength, and query-term coverage.
 
 
 def _tokenize_query(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
-def _estimate_accuracy(query: str, results: list[dict], jurisdiction: str | None) -> dict:
+def _estimate_accuracy(query: str, search_payload: dict) -> dict:
+    results = search_payload.get("results", [])
     if not results:
         return {
             "score": 0,
@@ -27,28 +47,32 @@ def _estimate_accuracy(query: str, results: list[dict], jurisdiction: str | None
             "reason": "No supporting code sections were retrieved for this query.",
         }
 
-    query_terms = {t for t in _tokenize_query(query) if len(t) > 2}
-    retrieved_text = " ".join(r["text"].lower() for r in results[:3])
+    query_terms = {term for term in _tokenize_query(query) if len(term) > 2}
+    retrieved_text = " ".join(
+        f"{result.get('summary', '')} {result.get('text', '')}".lower()
+        for result in results[:3]
+    )
     covered_terms = sum(1 for term in query_terms if term in retrieved_text)
     coverage = covered_terms / max(len(query_terms), 1)
 
-    rerank_scores = [float(r.get("rerank_score", 0.0)) for r in results[:3]]
-    rerank_strength = sum(rerank_scores) / max(len(rerank_scores), 1)
-
+    score_strength = sum(float(result.get("score", 0.0)) for result in results[:3]) / max(len(results[:3]), 1)
     support_count = min(len(results) / 5, 1.0)
+    exact_match_strength = 1.0 if any(
+        str(result.get("matched_by", "")).startswith("exact") for result in results[:3]
+    ) else 0.35
 
-    resolved_jurisdiction = resolve_jurisdiction(jurisdiction)
-    target_section = detect_section_filter(query, resolved_jurisdiction)
-    section_match = 0.75
-    if target_section:
-        top_sections = [r["meta"].get("section") for r in results[:3]]
-        section_match = 1.0 if target_section in top_sections else 0.2
+    matched_sections = search_payload.get("navigation", {}).get("matched_sections", [])
+    section_match = 0.65
+    if matched_sections:
+        top_sections = {result.get("meta", {}).get("section") for result in results[:3]}
+        section_match = 1.0 if any(section in top_sections for section in matched_sections) else 0.25
 
     raw_score = (
-        0.45 * rerank_strength +
-        0.30 * coverage +
-        0.15 * support_count +
-        0.10 * section_match
+        0.40 * score_strength
+        + 0.25 * coverage
+        + 0.20 * exact_match_strength
+        + 0.10 * support_count
+        + 0.05 * section_match
     )
     score = max(0, min(int(round(raw_score * 100)), 100))
 
@@ -59,16 +83,22 @@ def _estimate_accuracy(query: str, results: list[dict], jurisdiction: str | None
     else:
         label = "Low"
 
-    if target_section and section_match >= 1.0:
-        reason = f"Exact section match found for {target_section} with strong supporting text."
+    if matched_sections and section_match >= 1.0:
+        reason = "The tool chain found the requested section directly and the top evidence matches it."
+    elif exact_match_strength >= 1.0:
+        reason = "At least one exact section or subsection match was found and supported by the retrieved text."
     elif coverage >= 0.7:
-        reason = "Most of the key query terms appear in the top retrieved code sections."
+        reason = "Most of the important query terms appear in the strongest retrieved ordinance evidence."
     elif coverage >= 0.4:
-        reason = "The retrieval partially matches the query, but the support is mixed."
+        reason = "The retrieved ordinance evidence partially overlaps the query, but the support is mixed."
     else:
-        reason = "Only limited overlap was found between the query and the retrieved sections."
+        reason = "Only limited overlap was found between the query and the retrieved ordinance evidence."
 
-    return {"score": score, "label": label, "reason": reason}
+    return {
+        "score": score,
+        "label": label,
+        "reason": reason,
+    }
 
 
 def _build_source_link(meta: dict) -> str | None:
@@ -76,94 +106,91 @@ def _build_source_link(meta: dict) -> str | None:
     page = meta.get("page")
     if not source:
         return None
+
     url = f"{CUSTOM_RAG_BASE_URL}/pdf/{quote(source)}"
     if page:
         url += f"#page={page}"
     return url
 
 
-def ask(query: str,
-        top_k: int = 5,
-        jurisdiction: str | None = None,
-        debug: bool = False) -> dict:
-    """
-    Full RAG pipeline.
+# ---------------------------------------------------------------------------
+# Public RAG entry point
+# ---------------------------------------------------------------------------
 
-    Args:
-        query        : natural language question
-        top_k        : number of chunks to retrieve
-        jurisdiction : optional filter — "cooper city", "broward county", or None for all
-        debug        : print retrieval details to stdout
 
-    Returns:
-        {"answer": str, "sources": [...], "jurisdiction": str | None}
-    """
-    results = hybrid_search(
-        query,
-        top_k=top_k,
+def ask(
+    query: str,
+    top_k: int = 5,
+    jurisdiction: str | None = None,
+    debug: bool = False,
+) -> dict:
+    """Run the new tool-driven RAG pipeline over the normalized DB/Chroma stack."""
+
+    search_payload = TOOLKIT.run_tool_chain(
+        query=query,
         jurisdiction=jurisdiction,
-        verbose=debug,
+        top_k=top_k,
     )
+    results = search_payload["results"]
+    navigation = search_payload["navigation"]
 
     if debug and results:
-        print(f"\n🔍 Retrieved {len(results)} chunk(s)")
-        for i, r in enumerate(results):
-            m = r["meta"]
-            print(f"  {i+1}. [{m.get('jurisdiction')}] "
-                  f"{m.get('section')} {m.get('subsection') or '':6s}  "
-                  f"score={r['score']:.4f}  page={m.get('page')}")
+        print(f"\nRetrieved {len(results)} evidence block(s)")
+        for index, result in enumerate(results, start=1):
+            meta = result.get("meta", {})
+            print(
+                f"  {index}. [{meta.get('jurisdiction')}] "
+                f"{meta.get('section')} {meta.get('subsection') or ''} "
+                f"matched_by={result.get('matched_by')} "
+                f"score={float(result.get('score', 0.0)):.4f}"
+            )
 
-    answer = generate_answer(query, results)
-    accuracy = _estimate_accuracy(query, results, jurisdiction)
+    answer = generate_answer(query, search_payload)
+    accuracy = _estimate_accuracy(query, search_payload)
 
     sources = [
         {
-            "jurisdiction": r["meta"].get("jurisdiction"),
-            "source":       r["meta"].get("source"),
-            "section":      r["meta"].get("section"),
-            "subsection":   r["meta"].get("subsection"),
-            "title":        r["meta"].get("title"),
-            "page":         r["meta"].get("page"),
-            "score":        round(r["score"], 4),
-            "url":          _build_source_link(r["meta"]),
+            "jurisdiction": result.get("meta", {}).get("jurisdiction"),
+            "source": result.get("meta", {}).get("source"),
+            "section": result.get("meta", {}).get("section"),
+            "subsection": result.get("meta", {}).get("subsection"),
+            "title": result.get("meta", {}).get("title"),
+            "page": result.get("meta", {}).get("page"),
+            "score": round(float(result.get("score", 0.0)), 4),
+            "url": _build_source_link(result.get("meta", {})),
         }
-        for r in results
+        for result in results
     ]
 
     return {
-        "answer":       answer,
-        "accuracy":     accuracy,
-        "sources":      sources,
-        "jurisdiction": jurisdiction,
+        "answer": answer,
+        "accuracy": accuracy,
+        "sources": sources,
+        "navigation": navigation,
+        "jurisdiction": search_payload.get("resolved_document_title"),
+        "tool_trace": search_payload.get("tool_trace", []),
     }
 
 
 if __name__ == "__main__":
-    print("Cooper City / Broward RAG  |  type 'exit' to quit")
-    print("Prefix query with 'cooper:' or 'broward:' to filter jurisdiction\n")
+    print("Structured Civil AI RAG | type 'exit' to quit")
 
     while True:
         try:
-            raw = input("Ask: ").strip()
+            raw_query = input("Ask: ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
-        if raw.lower() in ("exit", "quit", ""):
+        if raw_query.lower() in {"exit", "quit", ""}:
             break
 
-        jur = None
-        q   = raw
-        if raw.lower().startswith("cooper:"):
-            jur, q = "cooper city", raw[7:].strip()
-        elif raw.lower().startswith("broward:"):
-            jur, q = "broward county", raw[8:].strip()
-
-        result = ask(q, jurisdiction=jur, debug=True)
-
-        print(f"\n💬 ANSWER:\n{result['answer']}\n")
-        print("📎 Sources:")
-        for s in result["sources"]:
-            print(f"  [{s['jurisdiction']}] "
-                  f"{s['section']} {s.get('subsection') or ''}  "
-                  f"(page {s['page']})")
+        result = ask(raw_query, debug=True)
+        print(f"\nANSWER:\n{result['answer']}\n")
+        print("Sources:")
+        for source in result["sources"]:
+            print(
+                f"  [{source['jurisdiction']}] "
+                f"{source['section']} {source.get('subsection') or ''} "
+                f"(page {source.get('page')})"
+            )
         print()

@@ -4,23 +4,23 @@ from fastapi.staticfiles import StaticFiles
 from typing import Optional
 
 import os
-import json
 import re
 import shutil
 import subprocess
 import sys
 import threading
-from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from CustomRAG.LLM.rag import ask
+from CustomRAG.db_scripts import ParserPipelineBuilder
+from CustomRAG.tools import StructuredToolFactory
 
 app = FastAPI(title="Civil AI — Custom RAG")
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PDF_DIR = os.path.join(PROJECT_ROOT, "Data", "PDF")
-PROCESSED_FILE = os.path.join(PROJECT_ROOT, "Data", "processed_files.json")
 INDEX_LOCK = threading.Lock()
 ENABLE_LLAMA_SERVER = os.getenv("ENABLE_LLAMA_SERVER", "false").lower() == "true"
+TOOLKIT = StructuredToolFactory.create_toolkit()
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,17 +39,6 @@ def _safe_pdf_name(filename: str) -> str:
     if not safe.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
     return safe
-
-
-def _jurisdiction_name_from_pdf(filename: str) -> str:
-    lower_name = filename.lower()
-    if "broward" in lower_name:
-        return "Broward County, FL"
-    if "cooper" in lower_name:
-        return "Cooper City, FL"
-    return Path(filename).stem.replace("_", " ")
-
-
 def _run_index_command(script_path: str, label: str) -> None:
     result = subprocess.run(
         [sys.executable, script_path],
@@ -72,6 +61,12 @@ def _run_optional_llama_index() -> None:
     _run_index_command(os.path.join("LlamaIndexRAG", "build_index.py"), "LlamaIndex indexing")
 
 
+def _run_custom_parse(pdf_path: str) -> dict:
+    # Build the parser on demand so uploads always use the current storage pipeline.
+    parser = ParserPipelineBuilder().build()
+    return parser.parse_uploaded_pdf(pdf_path)
+
+
 @app.get("/query")
 def query(
     q:            str,
@@ -92,6 +87,7 @@ def query(
     return {
         "answer":       result["answer"],
         "accuracy":     result["accuracy"],
+        "navigation":   result["navigation"],
         "system":       "custom",
         "jurisdiction": result["jurisdiction"],
         "sources":      result["sources"],
@@ -100,25 +96,37 @@ def query(
 
 @app.get("/jurisdictions")
 def list_jurisdictions():
-    """Returns jurisdictions inferred from processed_files.json."""
-    if not os.path.exists(PROCESSED_FILE):
-        return {"jurisdictions": []}
+    return {"jurisdictions": TOOLKIT.list_jurisdictions()}
 
-    counts: dict[str, int] = {}
-    with open(PROCESSED_FILE) as f:
-        processed = json.load(f)
 
-    for filename in processed.values():
-        if not isinstance(filename, str) or not filename.lower().endswith(".pdf"):
-            continue
-        jurisdiction = _jurisdiction_name_from_pdf(filename)
-        counts[jurisdiction] = counts.get(jurisdiction, 0) + 1
+@app.get("/navigation-map")
+def navigation_map():
+    return TOOLKIT.get_navigation_map()
 
-    jurisdictions = [
-        {"name": name, "chunks": count}
-        for name, count in sorted(counts.items())
-    ]
-    return {"jurisdictions": jurisdictions}
+
+@app.get("/structure")
+def structure(
+    jurisdiction: Optional[str] = Query(
+        default=None,
+        description="Optional jurisdiction to return one structured document map.",
+    ),
+):
+    full_map = TOOLKIT.get_navigation_map()
+    if not jurisdiction:
+        return full_map
+
+    document_slug = TOOLKIT.resolve_document_slug(jurisdiction)
+    if not document_slug:
+        raise HTTPException(status_code=404, detail="Jurisdiction not found in structured map.")
+
+    document = full_map.get("documents", {}).get(document_slug)
+    if not document:
+        raise HTTPException(status_code=404, detail="Structured document map not found.")
+
+    return {
+        "document_slug": document_slug,
+        "document": document,
+    }
 
 
 @app.post("/upload-pdf")
@@ -141,11 +149,13 @@ async def upload_pdf(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     with INDEX_LOCK:
-        _run_index_command(os.path.join("CustomRAG", "parse.py"), "Custom RAG indexing")
+        parse_result = _run_custom_parse(target_path)
+        TOOLKIT.refresh_navigation_cache()
         _run_optional_llama_index()
 
     return {
         "message": "PDF uploaded and indexed successfully.",
         "filename": os.path.basename(target_path),
         "path": target_path,
+        "parse_result": parse_result,
     }
