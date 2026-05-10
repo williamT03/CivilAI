@@ -1,0 +1,2 @@
+"""CivilAI database migration versions."""
+

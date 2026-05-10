@@ -1,0 +1,21 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+*.log
+backend-launch*.log
+
+# Local/generated backend state is mounted by docker-compose in development.
+backend/Data/chroma_db
+backend/Data/PDF
+backend/Data/parsed_json
+backend/Data/*.db
+backend/Data/*.json
+
+# Frontend build artifacts are not needed for backend image builds.
+frontend/Website/civil-ai-web/node_modules
+frontend/Website/civil-ai-web/.next
+frontend/Website/civil-ai-web/out
+frontend/Website/civil-ai-web/*.log
