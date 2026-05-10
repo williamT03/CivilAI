@@ -136,3 +136,8 @@
 ✓ Ready in 446ms
 
  GET /subscription 200 in 1749ms (next.js: 1440ms, application-code: 309ms)
+ GET / 200 in 114ms (next.js: 53ms, application-code: 61ms)
+✓ Compiled in 238ms
+ GET /subscription 200 in 155ms (next.js: 130ms, application-code: 25ms)
+ GET /subscription 200 in 294ms (next.js: 83ms, application-code: 211ms)
+ GET /subscription 200 in 190ms (next.js: 9ms, application-code: 181ms)

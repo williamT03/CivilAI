@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        REQUIREMENTS_FILE: ${DOCKER_REQUIREMENTS_FILE:-requirements-server.txt}
     env_file:
       - .env
     environment:
@@ -10,9 +12,11 @@ services:
       STRUCTURED_DATABASE_URL: ${STRUCTURED_DATABASE_URL:-postgresql+psycopg://civilai:civilai@postgres:5432/civilai}
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_URL: http://ollama:11434
+      OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://ollama:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - ./backend/Data:/app/backend/Data
     depends_on:
@@ -28,9 +32,19 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        REQUIREMENTS_FILE: ${DOCKER_REQUIREMENTS_FILE:-requirements-server.txt}
     env_file:
       - .env
     command: celery -A backend.app.worker.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://civilai:civilai@postgres:5432/civilai}
+      STRUCTURED_DATABASE_URL: ${STRUCTURED_DATABASE_URL:-postgresql+psycopg://civilai:civilai@postgres:5432/civilai}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://ollama:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       disable: true
     volumes:
@@ -92,7 +106,7 @@ services:
   nginx:
     image: nginx:1.29-alpine
     ports:
-      - "8080:80"
+      - "${NGINX_HOST_PORT:-8081}:80"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

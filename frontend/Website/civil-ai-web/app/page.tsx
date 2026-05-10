@@ -6,10 +6,8 @@ import { useRouter } from "next/navigation";
 import { Reveal } from "./components/Reveal";
 import { WorkspaceScaffold } from "./components/WorkspaceScaffold";
 import { useAuth } from "./context/AuthContext";
+import { CUSTOM_API_BASE } from "./lib/apiConfig";
 import { savePendingChatPrompt } from "./lib/chatIntent";
-
-const CUSTOM_API_BASE =
-  process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? "http://localhost:8000/api/custom";
 
 export default function HomePage() {
   const { user, isAuthenticated, isLoading, continueAsGuest } = useAuth();

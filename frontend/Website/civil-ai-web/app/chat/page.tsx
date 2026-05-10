@@ -5,12 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ProtectedRoute } from "../components/ProtectedRoute";
 import { SiteHeader } from "../components/SiteHeader";
 import { useAuth } from "../context/AuthContext";
+import { AUTH_API_BASE, CUSTOM_API_BASE } from "../lib/apiConfig";
 import { consumePendingChatPrompt } from "../lib/chatIntent";
-
-const CUSTOM_API_BASE =
-  process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? "http://localhost:8000/api/custom";
-const AUTH_API_BASE =
-  process.env.NEXT_PUBLIC_AUTH_API_BASE ?? "http://localhost:8000/api/auth";
 
 interface JurisdictionOption {
   name: string;

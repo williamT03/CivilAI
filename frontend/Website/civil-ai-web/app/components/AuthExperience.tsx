@@ -7,9 +7,7 @@ import { useRouter } from "next/navigation";
 
 import { SiteHeader } from "./SiteHeader";
 import { useAuth } from "../context/AuthContext";
-
-const CUSTOM_API_BASE =
-  process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? "http://localhost:8000/api/custom";
+import { CUSTOM_API_BASE } from "../lib/apiConfig";
 
 type AuthMode = "login" | "register";
 

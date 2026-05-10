@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
-const AUTH_API_BASE =
-  process.env.NEXT_PUBLIC_AUTH_API_BASE ?? "http://localhost:8000/api/auth";
+import { AUTH_API_BASE } from "../lib/apiConfig";
+
 const ACCESS_TOKEN_KEY = "civilai_access_token";
 const REFRESH_TOKEN_KEY = "civilai_refresh_token";
 const GUEST_SESSION_KEY = "civilai_guest_session";
