@@ -90,8 +90,11 @@ class SubscriptionUsageResponse(BaseModel):
     tier: str
     status: str
     monthly_token_limit: Optional[int]
+    monthly_message_limit: Optional[int]
     usage: dict
     remaining_tokens: Optional[int]
+    used_messages: int
+    remaining_messages: Optional[int]
 
 
 def _job_to_response(job: IngestionJob) -> IngestionJobResponse:
@@ -138,25 +141,48 @@ def _monthly_limit_for_user(user: Optional[UserResponse]) -> Optional[int]:
     settings = get_settings()
     tier = subscription.tier.lower()
     if tier == "pro":
-        return settings.pro_monthly_token_limit
+        return settings.pro_monthly_token_limit or None
     if tier in {"standard", "standard_user"}:
-        return settings.standard_monthly_token_limit
-    return settings.free_monthly_token_limit
+        return settings.standard_monthly_token_limit or None
+    return settings.free_monthly_token_limit or None
+
+
+def _monthly_message_limit_for_user(user: Optional[UserResponse]) -> Optional[int]:
+    if user is None:
+        return None
+    subscription = auth_db.get_subscription(user.id)
+    if subscription.status != "active":
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Subscription is not active.")
+
+    settings = get_settings()
+    tier = subscription.tier.lower()
+    if tier in {"pro", "standard", "standard_user"}:
+        return settings.pro_monthly_message_limit or None
+    return settings.free_monthly_message_limit or None
 
 
 def _enforce_usage_limit(user: Optional[UserResponse]) -> None:
     if user is None:
         return
     monthly_limit = _monthly_limit_for_user(user)
-    if monthly_limit is None:
-        return
     now = datetime.utcnow()
     usage = get_usage_tracker().monthly_usage_for_user(str(user.id), now.year, now.month)
-    used_tokens = usage["input_tokens"] + usage["output_tokens"] + usage["embedding_tokens"]
-    if used_tokens >= monthly_limit:
+    if monthly_limit is not None:
+        used_tokens = usage["input_tokens"] + usage["output_tokens"] + usage["embedding_tokens"]
+        if used_tokens >= monthly_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Monthly AI token limit reached for this subscription.",
+            )
+
+    monthly_message_limit = _monthly_message_limit_for_user(user)
+    if monthly_message_limit is None:
+        return
+    used_messages = get_usage_tracker().monthly_message_count_for_user(str(user.id), now.year, now.month)
+    if used_messages >= monthly_message_limit:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Monthly AI token limit reached for this subscription.",
+            detail="Monthly message limit reached for this subscription.",
         )
 
 
@@ -334,12 +360,18 @@ def subscription_usage(current_user: UserResponse = Depends(get_current_user)):
     now = datetime.utcnow()
     usage = get_usage_tracker().monthly_usage_for_user(str(current_user.id), now.year, now.month)
     monthly_limit = _monthly_limit_for_user(current_user)
+    monthly_message_limit = _monthly_message_limit_for_user(current_user)
     used_tokens = usage["input_tokens"] + usage["output_tokens"] + usage["embedding_tokens"]
     remaining = None if monthly_limit is None else max(0, monthly_limit - used_tokens)
+    used_messages = get_usage_tracker().monthly_message_count_for_user(str(current_user.id), now.year, now.month)
+    remaining_messages = None if monthly_message_limit is None else max(0, monthly_message_limit - used_messages)
     return SubscriptionUsageResponse(
         tier=subscription.tier,
         status=subscription.status,
         monthly_token_limit=monthly_limit,
+        monthly_message_limit=monthly_message_limit,
         usage=usage,
         remaining_tokens=remaining,
+        used_messages=used_messages,
+        remaining_messages=remaining_messages,
     )

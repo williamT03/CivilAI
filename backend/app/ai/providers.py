@@ -288,7 +288,7 @@ class OllamaProvider:
                 "model": self.model,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.05, "num_predict": 900},
+                "options": {"temperature": 0.05, "num_predict": 450},
             },
             timeout=self.timeout_seconds,
         )
@@ -325,7 +325,12 @@ class OllamaProvider:
     def stream(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> Iterator[str]:
         with requests.post(
             f"{self.base_url}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": True, "options": {"temperature": 0.05}},
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": True,
+                "options": {"temperature": 0.05, "num_predict": 450},
+            },
             timeout=self.timeout_seconds,
             stream=True,
         ) as response:
@@ -449,4 +454,3 @@ def get_ai_router() -> AIProviderRouter:
     if _router is None:
         _router = AIProviderRouter()
     return _router
-

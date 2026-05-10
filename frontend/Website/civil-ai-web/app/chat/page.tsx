@@ -630,19 +630,26 @@ function ChatWorkspace() {
         params.set("jurisdiction", selectedJurisdiction);
       }
 
-      const response = await fetch(`${CUSTOM_API_BASE}/query?${params.toString()}`);
+      const headers: HeadersInit = {};
+      if (token && !isGuest) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const response = await fetch(`${CUSTOM_API_BASE}/query?${params.toString()}`, { headers });
       const data = (await response.json()) as {
         answer?: string;
         accuracy?: Message["accuracy"];
         jurisdiction?: string | null;
         navigation?: Message["navigation"];
         sources?: Message["sources"];
+        detail?: string;
       };
 
       assistantMessage = {
         id: `local-assistant-${Date.now()}`,
         role: "assistant",
-        content: data.answer || "Sorry, I couldn't get a response.",
+        content: response.ok
+          ? data.answer || "Sorry, I couldn't get a response."
+          : data.detail || "Sorry, I couldn't get a response.",
         accuracy: data.accuracy,
         resolvedJurisdiction: data.jurisdiction,
         navigation: data.navigation,

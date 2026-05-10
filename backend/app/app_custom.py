@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from CustomRAG.LLM.rag import ask
@@ -17,12 +18,14 @@ from CustomRAG.db_scripts import ParserPipelineBuilder
 from CustomRAG.tools import StructuredToolFactory
 
 try:
+    from backend.app.ai.usage import get_usage_tracker
     from backend.app.auth import UserResponse, auth_db, decode_token
     from backend.app.core.config import get_settings
     from backend.app.ingestion import get_ingestion_job_store
     from backend.app.storage import get_file_storage
     from backend.app.worker import parse_pdf_job
 except ImportError:
+    from app.ai.usage import get_usage_tracker
     from app.auth import UserResponse, auth_db, decode_token
     from app.core.config import get_settings
     from app.ingestion import get_ingestion_job_store
@@ -120,6 +123,29 @@ def get_optional_current_user(
     return auth_db.get_user_by_id(user_id)
 
 
+def _monthly_message_limit_for_user(user: Optional[UserResponse]) -> Optional[int]:
+    if user is None:
+        return None
+    subscription = auth_db.get_subscription(user.id)
+    if subscription.status != "active":
+        raise HTTPException(status_code=402, detail="Subscription is not active.")
+    if subscription.tier.lower() in {"pro", "standard", "standard_user"}:
+        return settings.pro_monthly_message_limit or None
+    return settings.free_monthly_message_limit or None
+
+
+def _enforce_message_limit(user: Optional[UserResponse]) -> None:
+    if user is None:
+        return
+    monthly_limit = _monthly_message_limit_for_user(user)
+    if monthly_limit is None:
+        return
+    now = datetime.utcnow()
+    used_messages = get_usage_tracker().monthly_message_count_for_user(str(user.id), now.year, now.month)
+    if used_messages >= monthly_limit:
+        raise HTTPException(status_code=429, detail="Monthly message limit reached for this subscription.")
+
+
 @app.get("/query")
 def query(
     q: str,
@@ -137,6 +163,7 @@ def query(
       /query?q=general+penalty&jurisdiction=cooper+city
       /query?q=capital+improvements+fund   ← searches all jurisdictions
     """
+    _enforce_message_limit(current_user)
     result = ask(
         q,
         jurisdiction=jurisdiction,

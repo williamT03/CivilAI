@@ -12,9 +12,9 @@ except ImportError:  # pragma: no cover - allows running from backend cwd
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-# Leave room for the prompt wrapper and the final answer so the model does not
-# lose the important citation-bearing evidence blocks near the end.
-MAX_CONTEXT_CHARS = 28_000
+# Leave room for the prompt wrapper and the final answer. Ollama runs locally,
+# so the default context stays compact enough for a responsive chat loop.
+MAX_CONTEXT_CHARS = int(os.getenv("CIVILAI_MAX_CONTEXT_CHARS", "9000"))
 
 
 # ---------------------------------------------------------------------------

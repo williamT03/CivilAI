@@ -31,6 +31,8 @@ services:
     env_file:
       - .env
     command: celery -A backend.app.worker.celery_app worker --loglevel=INFO
+    healthcheck:
+      disable: true
     volumes:
       - ./backend/Data:/app/backend/Data
     depends_on:
@@ -101,4 +103,3 @@ volumes:
   postgres_data:
   qdrant_data:
   ollama_data:
-

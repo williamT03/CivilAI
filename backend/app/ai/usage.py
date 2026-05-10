@@ -152,6 +152,24 @@ class UsageTracker:
             "request_count": int(row[4] or 0),
         }
 
+    def monthly_message_count_for_user(self, user_id: str, year: int, month: int) -> int:
+        """Count completed answer generations for subscription message caps."""
+
+        start = datetime(year, month, 1)
+        end = datetime(year + int(month == 12), 1 if month == 12 else month + 1, 1)
+        with self.engine.begin() as connection:
+            count = connection.execute(
+                select(func.count()).where(
+                    usage_logs.c.user_id == user_id,
+                    usage_logs.c.operation.in_(["chat", "chat_stream"]),
+                    usage_logs.c.success == 1,
+                    usage_logs.c.created_at >= start,
+                    usage_logs.c.created_at < end,
+                )
+            ).scalar_one()
+
+        return int(count or 0)
+
     @staticmethod
     def estimate_cost(event: UsageEvent) -> float:
         prefix = f"AI_PRICE_{event.provider}_{event.model}".upper().replace("-", "_").replace(".", "_")
