@@ -14,10 +14,10 @@ for path in (CUSTOM_RAG_DIR, BACKEND_ROOT):
         sys.path.append(path)
 
 try:
-    from CustomRAG.LLM.llm import generate_answer
+    from CustomRAG.LLM.llm import generate_answer, stream_answer
     from CustomRAG.tools import StructuredToolFactory
 except ImportError:
-    from LLM.llm import generate_answer
+    from LLM.llm import generate_answer, stream_answer
     from tools import StructuredToolFactory
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -48,6 +48,10 @@ def _estimate_accuracy(query: str, search_payload: dict) -> dict:
         }
 
     query_terms = {term for term in _tokenize_query(query) if len(term) > 2}
+    top_match_types = [str(result.get("matched_by", "")) for result in results[:3]]
+    keyword_only = bool(top_match_types) and all(
+        match_type.startswith("keyword") for match_type in top_match_types
+    )
     retrieved_text = " ".join(
         f"{result.get('summary', '')} {result.get('text', '')}".lower()
         for result in results[:3]
@@ -74,6 +78,8 @@ def _estimate_accuracy(query: str, search_payload: dict) -> dict:
         + 0.10 * support_count
         + 0.05 * section_match
     )
+    if keyword_only:
+        raw_score *= 0.45
     score = max(0, min(int(round(raw_score * 100)), 100))
 
     if score >= 80:
@@ -87,6 +93,8 @@ def _estimate_accuracy(query: str, search_payload: dict) -> dict:
         reason = "The tool chain found the requested section directly and the top evidence matches it."
     elif exact_match_strength >= 1.0:
         reason = "At least one exact section or subsection match was found and supported by the retrieved text."
+    elif keyword_only:
+        reason = "Only loose keyword overlap was found, so the supporting ordinance evidence is weak."
     elif coverage >= 0.7:
         reason = "Most of the important query terms appear in the strongest retrieved ordinance evidence."
     elif coverage >= 0.4:
@@ -123,6 +131,8 @@ def ask(
     top_k: int = 5,
     jurisdiction: str | None = None,
     debug: bool = False,
+    user_id: str | None = None,
+    request_id: str | None = None,
 ) -> dict:
     """Run the new tool-driven RAG pipeline over the normalized DB/Chroma stack."""
 
@@ -130,6 +140,7 @@ def ask(
         query=query,
         jurisdiction=jurisdiction,
         top_k=top_k,
+        user_id=user_id,
     )
     results = search_payload["results"]
     navigation = search_payload["navigation"]
@@ -145,7 +156,7 @@ def ask(
                 f"score={float(result.get('score', 0.0)):.4f}"
             )
 
-    answer = generate_answer(query, search_payload)
+    answer = _generate_answer(query, search_payload, user_id=user_id, request_id=request_id)
     accuracy = _estimate_accuracy(query, search_payload)
 
     sources = [
@@ -170,6 +181,74 @@ def ask(
         "jurisdiction": search_payload.get("resolved_document_title"),
         "tool_trace": search_payload.get("tool_trace", []),
     }
+
+
+def retrieve(
+    query: str,
+    top_k: int = 5,
+    jurisdiction: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    """Return structured retrieval payload without generating an answer."""
+
+    search_payload = TOOLKIT.run_tool_chain(
+        query=query,
+        jurisdiction=jurisdiction,
+        top_k=top_k,
+        user_id=user_id,
+    )
+    return {
+        "search_payload": search_payload,
+        "accuracy": _estimate_accuracy(query, search_payload),
+        "sources": [
+            {
+                "jurisdiction": result.get("meta", {}).get("jurisdiction"),
+                "source": result.get("meta", {}).get("source"),
+                "section": result.get("meta", {}).get("section"),
+                "subsection": result.get("meta", {}).get("subsection"),
+                "title": result.get("meta", {}).get("title"),
+                "page": result.get("meta", {}).get("page"),
+                "score": round(float(result.get("score", 0.0)), 4),
+                "url": _build_source_link(result.get("meta", {})),
+            }
+            for result in search_payload.get("results", [])
+        ],
+    }
+
+
+def _generate_answer(
+    query: str,
+    search_payload: dict,
+    *,
+    user_id: str | None = None,
+    request_id: str | None = None,
+) -> str:
+    """Call the answer generator while remaining compatible with older test doubles."""
+
+    try:
+        return generate_answer(query, search_payload, user_id=user_id, request_id=request_id)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return generate_answer(query, search_payload)
+
+
+def stream_ask(
+    query: str,
+    top_k: int = 5,
+    jurisdiction: str | None = None,
+    user_id: str | None = None,
+    request_id: str | None = None,
+):
+    """Run retrieval once, then stream the generated answer."""
+
+    retrieval = retrieve(query=query, top_k=top_k, jurisdiction=jurisdiction, user_id=user_id)
+    yield from stream_answer(
+        query,
+        retrieval["search_payload"],
+        user_id=user_id,
+        request_id=request_id,
+    )
 
 
 if __name__ == "__main__":

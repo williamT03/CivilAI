@@ -18,3 +18,12 @@ Documentation/
 # Python cache
 __pycache__/
 *.pyc
+
+# Local launch/build output
+*.log
+backend-launch*.log
+frontend-launch*.log
+frontend-live*.log
+node_modules/
+.next/
+out/

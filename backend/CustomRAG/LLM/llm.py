@@ -1,14 +1,16 @@
 import os
 import textwrap
+from collections.abc import Iterator
 
-import requests
 from dotenv import load_dotenv
+
+try:
+    from backend.app.ai.providers import get_ai_router
+except ImportError:  # pragma: no cover - allows running from backend cwd
+    from app.ai.providers import get_ai_router
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 # Leave room for the prompt wrapper and the final answer so the model does not
 # lose the important citation-bearing evidence blocks near the end.
@@ -148,38 +150,50 @@ def build_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Ollama transport
+# Provider transport
 # ---------------------------------------------------------------------------
 
 
-def call_ollama(prompt: str, timeout: int = 120) -> str:
-    """Call the configured Ollama model with a low-temperature legal prompt."""
+def call_ai_provider(
+    prompt: str,
+    *,
+    purpose: str = "answer",
+    user_id: str | None = None,
+    request_id: str | None = None,
+    endpoint: str | None = "/api/custom/query",
+) -> str:
+    """Call the configured provider route with OpenAI/DeepSeek/Ollama fallback."""
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.05,
-                    "num_predict": 700,
-                },
-            },
-            timeout=timeout,
+        response = get_ai_router().generate(
+            prompt,
+            purpose=purpose,
+            user_id=user_id,
+            request_id=request_id,
+            endpoint=endpoint,
         )
-        response.raise_for_status()
-        return response.json()["response"].strip()
+        return response.text.strip()
+    except Exception as error:
+        return f"Error: AI provider route failed — {error}"
 
-    except requests.exceptions.Timeout:
-        return "Error: Ollama request timed out. Is `ollama serve` running?"
-    except requests.exceptions.ConnectionError:
-        return f"Error: Cannot connect to Ollama at {OLLAMA_URL}."
-    except (KeyError, ValueError) as error:
-        return f"Error: Unexpected Ollama response — {error}"
-    except requests.exceptions.HTTPError as error:
-        return f"Error: Ollama HTTP error — {error}"
+
+def stream_ai_provider(
+    prompt: str,
+    *,
+    purpose: str = "answer",
+    user_id: str | None = None,
+    request_id: str | None = None,
+    endpoint: str | None = "/api/v1/query/stream",
+) -> Iterator[str]:
+    """Stream chunks from the configured provider route."""
+
+    yield from get_ai_router().stream(
+        prompt,
+        purpose=purpose,
+        user_id=user_id,
+        request_id=request_id,
+        endpoint=endpoint,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +201,11 @@ def call_ollama(prompt: str, timeout: int = 120) -> str:
 # ---------------------------------------------------------------------------
 
 
-def generate_answer(query: str, retrieval_payload: dict | list[dict]) -> str:
-    """Generate an answer from the structured retrieval payload produced by the new stack."""
+def prepare_answer_prompt(
+    query: str,
+    retrieval_payload: dict | list[dict],
+) -> str:
+    """Build the final grounded answer prompt from a structured retrieval payload."""
 
     if isinstance(retrieval_payload, dict):
         results = retrieval_payload.get("results", [])
@@ -202,7 +219,7 @@ def generate_answer(query: str, retrieval_payload: dict | list[dict]) -> str:
         summary_preview = None
 
     if not results:
-        return "No relevant sections retrieved from the municipal code."
+        return ""
 
     jurisdiction_label = navigation.get("document_title")
     if not jurisdiction_label:
@@ -214,11 +231,41 @@ def generate_answer(query: str, retrieval_payload: dict | list[dict]) -> str:
         jurisdiction_label = next(iter(jurisdictions)) if len(jurisdictions) == 1 else None
 
     context = build_context(results)
-    prompt = build_prompt(
+    return build_prompt(
         query=query,
         context=context,
         tool_trace=build_tool_trace(tool_trace),
         jurisdiction_label=jurisdiction_label,
         summary_preview=summary_preview,
     )
-    return call_ollama(prompt)
+
+
+def generate_answer(
+    query: str,
+    retrieval_payload: dict | list[dict],
+    *,
+    user_id: str | None = None,
+    request_id: str | None = None,
+) -> str:
+    """Generate an answer from the structured retrieval payload produced by the new stack."""
+
+    prompt = prepare_answer_prompt(query, retrieval_payload)
+    if not prompt:
+        return "No relevant sections retrieved from the municipal code."
+    return call_ai_provider(prompt, user_id=user_id, request_id=request_id)
+
+
+def stream_answer(
+    query: str,
+    retrieval_payload: dict | list[dict],
+    *,
+    user_id: str | None = None,
+    request_id: str | None = None,
+) -> Iterator[str]:
+    """Stream an answer from the structured retrieval payload."""
+
+    prompt = prepare_answer_prompt(query, retrieval_payload)
+    if not prompt:
+        yield "No relevant sections retrieved from the municipal code."
+        return
+    yield from stream_ai_provider(prompt, user_id=user_id, request_id=request_id)

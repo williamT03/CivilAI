@@ -9,8 +9,20 @@ from pathlib import Path
 from typing import Sequence
 
 # Reuse the normalized SQL and Chroma layers that were built for the new stack.
-from ..db_scripts.DB import DatabaseManager
-from ..db_scripts.chroma import ChromaCollectionFactory, ChromaManager
+try:
+    from ..db_scripts.DB import DatabaseManager
+    from ..db_scripts.chroma import (
+        ChromaCollectionFactory,
+        ChromaManager,
+        create_runtime_vector_manager,
+    )
+except ImportError:
+    from CustomRAG.db_scripts.DB import DatabaseManager
+    from CustomRAG.db_scripts.chroma import (
+        ChromaCollectionFactory,
+        ChromaManager,
+        create_runtime_vector_manager,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +141,8 @@ class NavigationMapBuilder:
                 "document_title": document_title,
                 "document_slug": document_slug,
                 "source_filename": hierarchy.get("source_filename"),
+                "owner_user_id": hierarchy.get("owner_user_id"),
+                "visibility": hierarchy.get("visibility", "public"),
                 "aliases": aliases,
                 "chapter_count": len(chapter_payloads),
                 "section_count": section_total,
@@ -217,7 +231,7 @@ class StructuredToolFactory:
 
     @staticmethod
     def create_chroma_manager(paths: StructuredToolPaths, db_manager: DatabaseManager) -> ChromaManager:
-        return ChromaManager(
+        return create_runtime_vector_manager(
             persist_directory=paths.chroma_dir,
             db_manager=db_manager,
         )
@@ -297,32 +311,42 @@ class StructuredRetrievalToolkit:
         self.summary_builder = summary_builder or StructuredSummaryBuilder()
         self.navigation_builder = navigation_builder or NavigationMapBuilder()
         self._navigation_cache: dict | None = None
+        self._navigation_cache_by_user: dict[str, dict] = {}
 
     def refresh_navigation_cache(self) -> dict:
         """Rebuild the navigation hashmap after new PDFs are parsed and stored."""
 
         self._navigation_cache = None
+        self._navigation_cache_by_user = {}
         return self.get_navigation_map(refresh=True)
 
-    def get_navigation_map(self, refresh: bool = False) -> dict:
+    def get_navigation_map(self, refresh: bool = False, user_id: str | None = None) -> dict:
         """Return the current navigation hashmap built from the structured database."""
 
-        if self._navigation_cache is not None and not refresh:
+        if user_id:
+            cache_key = str(user_id)
+            if cache_key in self._navigation_cache_by_user and not refresh:
+                return self._navigation_cache_by_user[cache_key]
+        elif self._navigation_cache is not None and not refresh:
             return self._navigation_cache
 
         hierarchies: list[dict] = []
-        for document in self.db_manager.list_documents():
-            hierarchy = self.db_manager.fetch_document_hierarchy(document["document_slug"])
+        for document in self.db_manager.list_documents(user_id=user_id):
+            hierarchy = self.db_manager.fetch_document_hierarchy(document["document_slug"], user_id=user_id)
             if hierarchy is not None:
                 hierarchies.append(hierarchy)
 
-        self._navigation_cache = self.navigation_builder.build(hierarchies)
-        return self._navigation_cache
+        navigation_map = self.navigation_builder.build(hierarchies)
+        if user_id:
+            self._navigation_cache_by_user[str(user_id)] = navigation_map
+        else:
+            self._navigation_cache = navigation_map
+        return navigation_map
 
-    def list_jurisdictions(self) -> list[dict]:
+    def list_jurisdictions(self, user_id: str | None = None) -> list[dict]:
         """Return the code-focus options that should appear in the website filter."""
 
-        navigation_map = self.get_navigation_map()
+        navigation_map = self.get_navigation_map(user_id=user_id)
         jurisdictions = []
         for document in navigation_map.get("documents", {}).values():
             # `chunks` stays as the legacy field name expected by the frontend,
@@ -336,10 +360,10 @@ class StructuredRetrievalToolkit:
             )
         return sorted(jurisdictions, key=lambda item: item["name"].lower())
 
-    def resolve_document_slug(self, user_text: str | None) -> str | None:
+    def resolve_document_slug(self, user_text: str | None, user_id: str | None = None) -> str | None:
         """Resolve a user-provided jurisdiction string or query text to one document slug."""
 
-        navigation_map = self.get_navigation_map()
+        navigation_map = self.get_navigation_map(user_id=user_id)
         documents = navigation_map.get("documents", {})
         if not documents:
             return None
@@ -364,12 +388,13 @@ class StructuredRetrievalToolkit:
                 normalized_candidate = self._normalize_lookup_value(candidate)
                 if not normalized_candidate:
                     continue
+                owner_boost = 20 if user_id and str(document.get("owner_user_id") or "") == str(user_id) else 0
                 if normalized_input == normalized_candidate:
-                    best_score = max(best_score, 100)
+                    best_score = max(best_score, 100 + owner_boost)
                 elif normalized_candidate in normalized_input:
-                    best_score = max(best_score, 80 + min(len(normalized_candidate), 15))
+                    best_score = max(best_score, 80 + min(len(normalized_candidate), 15) + owner_boost)
                 elif normalized_input in normalized_candidate:
-                    best_score = max(best_score, 65 + min(len(normalized_input), 15))
+                    best_score = max(best_score, 65 + min(len(normalized_input), 15) + owner_boost)
             if best_score > 0:
                 scored_candidates.append((best_score, document_slug))
 
@@ -419,10 +444,15 @@ class StructuredRetrievalToolkit:
         lowered = (query or "").lower()
         return any(keyword in lowered for keyword in ("summarize", "summary", "overview", "synopsis"))
 
-    def summarize_sections(self, document_slug: str, section_numbers: Sequence[str]) -> dict | None:
+    def summarize_sections(
+        self,
+        document_slug: str,
+        section_numbers: Sequence[str],
+        user_id: str | None = None,
+    ) -> dict | None:
         """Summarize one or more exact sections from the structured database."""
 
-        section_rows = self.db_manager.find_sections(document_slug, section_numbers=section_numbers)
+        section_rows = self.db_manager.find_sections(document_slug, section_numbers=section_numbers, user_id=user_id)
         if not section_rows:
             return None
 
@@ -447,13 +477,19 @@ class StructuredRetrievalToolkit:
             "sources": sources,
         }
 
-    def run_tool_chain(self, query: str, jurisdiction: str | None = None, top_k: int = 5) -> dict:
+    def run_tool_chain(
+        self,
+        query: str,
+        jurisdiction: str | None = None,
+        top_k: int = 5,
+        user_id: str | None = None,
+    ) -> dict:
         """Execute the retrieval tools in a deterministic order before prompting the LLM."""
 
-        navigation_map = self.get_navigation_map()
+        navigation_map = self.get_navigation_map(user_id=user_id)
 
         # Resolve the code focus from either the explicit filter or the query itself.
-        resolved_document_slug = self.resolve_document_slug(jurisdiction) or self.resolve_document_slug(query)
+        resolved_document_slug = self.resolve_document_slug(jurisdiction, user_id=user_id) or self.resolve_document_slug(query, user_id=user_id)
         resolved_document = navigation_map.get("documents", {}).get(resolved_document_slug or "")
 
         tool_trace: list[dict] = []
@@ -491,6 +527,7 @@ class StructuredRetrievalToolkit:
             section_filters=section_filters,
             subsection_filters=subsection_filters,
             navigation_map=navigation_map,
+            user_id=user_id,
         )
         if exact_results:
             tool_trace.append(
@@ -504,6 +541,7 @@ class StructuredRetrievalToolkit:
             query=query,
             document_slug=resolved_document_slug,
             limit=max(top_k, 8),
+            user_id=user_id,
         )
         if semantic_results:
             tool_trace.append(
@@ -513,7 +551,28 @@ class StructuredRetrievalToolkit:
                 }
             )
 
-        merged_results = self._merge_results(exact_results, semantic_results, top_k)
+        keyword_results = self.keyword_search(
+            query=query,
+            document_slug=resolved_document_slug,
+            navigation_map=navigation_map,
+            limit=max(top_k, 8),
+            user_id=user_id,
+        )
+        if keyword_results:
+            tool_trace.append(
+                {
+                    "tool": "keyword_search",
+                    "output_count": len(keyword_results),
+                }
+            )
+
+        merged_results = self._merge_results(
+            query=query,
+            exact_results=exact_results,
+            keyword_results=keyword_results,
+            semantic_results=semantic_results,
+            top_k=top_k,
+        )
 
         summary_preview = None
         if self.detect_summary_intent(query) and section_filters:
@@ -521,7 +580,7 @@ class StructuredRetrievalToolkit:
             if summary_target_slug is None and merged_results:
                 summary_target_slug = merged_results[0]["meta"].get("document_slug")
             if summary_target_slug:
-                summary_preview = self.summarize_sections(summary_target_slug, section_filters)
+                summary_preview = self.summarize_sections(summary_target_slug, section_filters, user_id=user_id)
                 if summary_preview:
                     tool_trace.append(
                         {
@@ -547,28 +606,78 @@ class StructuredRetrievalToolkit:
             "summary_preview": summary_preview,
         }
 
-    def semantic_search(self, query: str, document_slug: str | None = None, limit: int = 8) -> list[dict]:
+    def semantic_search(
+        self,
+        query: str,
+        document_slug: str | None = None,
+        limit: int = 8,
+        user_id: str | None = None,
+    ) -> list[dict]:
         """Query Chroma section/subsection collections and hydrate results from SQL."""
 
-        where_filter = {"document_slug": document_slug} if document_slug else None
+        where_filters = self._semantic_where_filters(document_slug=document_slug, user_id=user_id)
         combined_results: list[dict] = []
 
         for collection_name in (
             ChromaCollectionFactory.SECTION_COLLECTION,
             ChromaCollectionFactory.SUBSECTION_COLLECTION,
         ):
-            chroma_rows = self.chroma_manager.query_collection(
-                collection_name=collection_name,
-                query_text=query,
-                n_results=limit,
-                where=where_filter,
-            )
-            for chroma_row in chroma_rows:
-                hydrated = self._hydrate_chroma_result(chroma_row)
-                if hydrated is not None:
-                    combined_results.append(hydrated)
+            for where_filter in where_filters:
+                chroma_rows = self.chroma_manager.query_collection(
+                    collection_name=collection_name,
+                    query_text=query,
+                    n_results=limit,
+                    where=where_filter,
+                )
+                for chroma_row in chroma_rows:
+                    if not self._vector_row_visible_to_user(chroma_row, user_id=user_id):
+                        continue
+                    hydrated = self._hydrate_chroma_result(chroma_row, user_id=user_id)
+                    if hydrated is not None:
+                        combined_results.append(hydrated)
 
         return self._dedupe_results(combined_results)[:limit]
+
+    def keyword_search(
+        self,
+        query: str,
+        document_slug: str | None,
+        navigation_map: dict,
+        limit: int = 8,
+        user_id: str | None = None,
+    ) -> list[dict]:
+        """Run a lightweight lexical section search before falling back to the LLM."""
+
+        candidate_document_slugs = (
+            [document_slug]
+            if document_slug
+            else list(navigation_map.get("documents", {}).keys())
+        )
+
+        keyword_results: list[dict] = []
+        for candidate_slug in candidate_document_slugs:
+            if not candidate_slug:
+                continue
+
+            section_rows = self.db_manager.search_sections_by_query_terms(
+                document_title_or_slug=candidate_slug,
+                query=query,
+                limit=limit,
+                user_id=user_id,
+            )
+            for section_row in section_rows:
+                lexical_score = float(section_row.get("lexical_score", 0.0))
+                keyword_results.append(
+                    self._section_row_to_result(
+                        section_row,
+                        score=min(0.82, 0.28 + (min(lexical_score, 1.8) * 0.22)),
+                        matched_by="keyword_section",
+                        lexical_score=lexical_score,
+                    )
+                )
+
+        keyword_results.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        return self._dedupe_results(keyword_results)[:limit]
 
     def _lookup_exact_matches(
         self,
@@ -576,6 +685,7 @@ class StructuredRetrievalToolkit:
         section_filters: Sequence[str],
         subsection_filters: Sequence[dict],
         navigation_map: dict,
+        user_id: str | None = None,
     ) -> list[dict]:
         # Exact lookups are run against the SQL layer because those matches are
         # cheaper and more trustworthy than a semantic query.
@@ -595,6 +705,7 @@ class StructuredRetrievalToolkit:
                     document_title_or_slug=candidate_slug,
                     section_number=subsection_filter["section_number"],
                     subsection_numbers=[subsection_filter["subsection_number"]],
+                    user_id=user_id,
                 )
                 for subsection_row in subsection_rows:
                     exact_results.append(
@@ -609,6 +720,7 @@ class StructuredRetrievalToolkit:
                 section_rows = self.db_manager.find_sections(
                     document_title_or_slug=candidate_slug,
                     section_numbers=section_filters,
+                    user_id=user_id,
                 )
                 for section_row in section_rows:
                     exact_results.append(
@@ -621,7 +733,7 @@ class StructuredRetrievalToolkit:
 
         return self._dedupe_results(exact_results)
 
-    def _hydrate_chroma_result(self, chroma_row: dict) -> dict | None:
+    def _hydrate_chroma_result(self, chroma_row: dict, user_id: str | None = None) -> dict | None:
         metadata = chroma_row.get("metadata", {})
         node_type = metadata.get("node_type")
         document_slug = metadata.get("document_slug")
@@ -631,6 +743,7 @@ class StructuredRetrievalToolkit:
             section_rows = self.db_manager.find_sections(
                 document_title_or_slug=str(document_slug),
                 section_numbers=[metadata.get("section_number", "")],
+                user_id=user_id,
             )
             if section_rows:
                 return self._section_row_to_result(
@@ -644,6 +757,7 @@ class StructuredRetrievalToolkit:
                 document_title_or_slug=str(document_slug),
                 section_number=str(metadata.get("section_number", "")),
                 subsection_numbers=[str(metadata.get("subsection_number", ""))],
+                user_id=user_id,
             )
             if subsection_rows:
                 return self._subsection_row_to_result(
@@ -654,7 +768,13 @@ class StructuredRetrievalToolkit:
 
         return None
 
-    def _section_row_to_result(self, section_row: dict, score: float, matched_by: str) -> dict:
+    def _section_row_to_result(
+        self,
+        section_row: dict,
+        score: float,
+        matched_by: str,
+        lexical_score: float | None = None,
+    ) -> dict:
         section_text = self._compose_section_text(section_row)
         section_summary = section_row.get("section_summary") or self.summary_builder.summarize(section_text)
 
@@ -664,6 +784,8 @@ class StructuredRetrievalToolkit:
             "score": score,
             "rerank_score": score,
             "matched_by": matched_by,
+            "matched_methods": [matched_by],
+            "lexical_score": lexical_score,
             "meta": {
                 "jurisdiction": section_row["document_title"],
                 "document_slug": section_row["document_slug"],
@@ -675,6 +797,8 @@ class StructuredRetrievalToolkit:
                 "chapter_name": section_row["chapter_name"],
                 "page": section_row.get("toc_page"),
                 "node_type": "section",
+                "owner_user_id": section_row.get("owner_user_id"),
+                "visibility": section_row.get("visibility") or "public",
             },
         }
 
@@ -688,6 +812,8 @@ class StructuredRetrievalToolkit:
             "score": score,
             "rerank_score": score,
             "matched_by": matched_by,
+            "matched_methods": [matched_by],
+            "lexical_score": None,
             "meta": {
                 "jurisdiction": subsection_row["document_title"],
                 "document_slug": subsection_row["document_slug"],
@@ -699,8 +825,27 @@ class StructuredRetrievalToolkit:
                 "chapter_name": subsection_row["chapter_name"],
                 "page": subsection_row.get("toc_page"),
                 "node_type": "subsection",
+                "owner_user_id": subsection_row.get("owner_user_id"),
+                "visibility": subsection_row.get("visibility") or "public",
             },
         }
+
+    @staticmethod
+    def _vector_row_visible_to_user(chroma_row: dict, user_id: str | None = None) -> bool:
+        metadata = chroma_row.get("metadata", {})
+        visibility = str(metadata.get("visibility") or "public")
+        owner_user_id = str(metadata.get("owner_user_id") or "")
+        if visibility == "public":
+            return True
+        return bool(user_id and owner_user_id == str(user_id))
+
+    @staticmethod
+    def _semantic_where_filters(document_slug: str | None, user_id: str | None) -> list[dict | None]:
+        if document_slug:
+            return [{"document_slug": document_slug}]
+        if user_id:
+            return [{"visibility": "public"}, {"owner_user_id": str(user_id)}]
+        return [None]
 
     def _compose_section_text(self, section_row: dict) -> str:
         # Prefer the section body itself. If the section body is empty, use the
@@ -732,10 +877,72 @@ class StructuredRetrievalToolkit:
             or ""
         ).strip()
 
-    def _merge_results(self, exact_results: Sequence[dict], semantic_results: Sequence[dict], top_k: int) -> list[dict]:
-        combined = self._dedupe_results([*exact_results, *semantic_results])
-        combined.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
-        return combined[:top_k]
+    def _merge_results(
+        self,
+        query: str,
+        exact_results: Sequence[dict],
+        keyword_results: Sequence[dict],
+        semantic_results: Sequence[dict],
+        top_k: int,
+    ) -> list[dict]:
+        query_terms = self._extract_query_terms(query)
+        aggregated: dict[tuple[str, str, str], dict] = {}
+
+        for result in [*exact_results, *keyword_results, *semantic_results]:
+            key = self._result_key(result)
+            current = aggregated.get(key)
+            if current is None:
+                current = {
+                    **result,
+                    "matched_methods": list(result.get("matched_methods", [result.get("matched_by", "")])),
+                    "channel_scores": {str(result.get("matched_by", "")): float(result.get("score", 0.0))},
+                    "lexical_score": result.get("lexical_score"),
+                }
+                aggregated[key] = current
+                continue
+
+            candidate_score = float(result.get("score", 0.0))
+            current_score = float(current.get("score", 0.0))
+            if candidate_score > current_score:
+                preserved_methods = current.get("matched_methods", [])
+                channel_scores = current.get("channel_scores", {})
+                lexical_score = current.get("lexical_score")
+                current.update(result)
+                current["matched_methods"] = preserved_methods
+                current["channel_scores"] = channel_scores
+                current["lexical_score"] = lexical_score
+
+            matched_by = str(result.get("matched_by", ""))
+            if matched_by and matched_by not in current["matched_methods"]:
+                current["matched_methods"].append(matched_by)
+            current["channel_scores"][matched_by] = max(
+                candidate_score,
+                float(current["channel_scores"].get(matched_by, 0.0)),
+            )
+
+            incoming_lexical = result.get("lexical_score")
+            if incoming_lexical is not None:
+                existing_lexical = current.get("lexical_score")
+                if existing_lexical is None or float(incoming_lexical) > float(existing_lexical):
+                    current["lexical_score"] = incoming_lexical
+
+        reranked_results: list[dict] = []
+        for result in aggregated.values():
+            rerank_score = self._compute_result_rank(result, query_terms)
+            result["score"] = rerank_score
+            result["rerank_score"] = rerank_score
+            result["matched_by"] = self._select_primary_match_method(result.get("matched_methods", []))
+            reranked_results.append(result)
+
+        reranked_results.sort(
+            key=lambda item: (
+                float(item.get("rerank_score", 0.0)),
+                self._match_method_priority(item.get("matched_by", "")),
+                len(item.get("text", "") or ""),
+            ),
+            reverse=True,
+        )
+        return reranked_results[:top_k]
 
     def _dedupe_results(self, results: Sequence[dict]) -> list[dict]:
         # Deduplicate by the most specific citation key so an exact match and a
@@ -753,6 +960,115 @@ class StructuredRetrievalToolkit:
                 deduped[key] = result
 
         return list(deduped.values())
+
+    def _compute_result_rank(self, result: dict, query_terms: Sequence[str]) -> float:
+        """Blend channel agreement and topic overlap into one sortable rank."""
+
+        matched_methods = [str(method) for method in result.get("matched_methods", []) if method]
+        channel_scores = {
+            str(method): float(score)
+            for method, score in (result.get("channel_scores") or {}).items()
+        }
+        base_score = max(channel_scores.values(), default=float(result.get("score", 0.0)))
+        lexical_score = float(result.get("lexical_score") or 0.0)
+
+        text = " ".join(
+            [
+                str(result.get("summary") or ""),
+                str(result.get("text") or ""),
+                str(result.get("meta", {}).get("chapter_name") or ""),
+                str(result.get("meta", {}).get("title") or ""),
+            ]
+        ).lower()
+        coverage = 0.0
+        if query_terms:
+            coverage = sum(1 for term in query_terms if term in text) / len(query_terms)
+
+        semantic_present = any(method.startswith("semantic") for method in matched_methods)
+        keyword_present = any(method.startswith("keyword") for method in matched_methods)
+        exact_present = any(method.startswith("exact") for method in matched_methods)
+
+        rerank_score = base_score
+        rerank_score += min(coverage * 0.18, 0.18)
+        rerank_score += min(lexical_score * 0.04, 0.08)
+
+        if exact_present:
+            rerank_score += 0.18
+        if semantic_present and keyword_present:
+            rerank_score += 0.14
+        elif semantic_present:
+            rerank_score += 0.06
+        elif keyword_present:
+            rerank_score += 0.02
+
+        return min(rerank_score, 1.0)
+
+    @staticmethod
+    def _select_primary_match_method(matched_methods: Sequence[str]) -> str:
+        """Pick the strongest retrieval label for downstream explanations."""
+
+        methods = [str(method) for method in matched_methods if method]
+        for prefix in ("exact", "semantic", "keyword"):
+            for method in methods:
+                if method.startswith(prefix):
+                    return method
+        return methods[0] if methods else ""
+
+    @staticmethod
+    def _match_method_priority(matched_by: str) -> int:
+        if str(matched_by).startswith("exact"):
+            return 3
+        if str(matched_by).startswith("semantic"):
+            return 2
+        if str(matched_by).startswith("keyword"):
+            return 1
+        return 0
+
+    @staticmethod
+    def _result_key(result: dict) -> tuple[str, str, str]:
+        meta = result.get("meta", {})
+        return (
+            str(meta.get("document_slug") or ""),
+            str(meta.get("section") or ""),
+            str(meta.get("subsection") or ""),
+        )
+
+    @staticmethod
+    def _extract_query_terms(query: str) -> list[str]:
+        stop_words = {
+            "what",
+            "does",
+            "about",
+            "that",
+            "this",
+            "with",
+            "from",
+            "into",
+            "when",
+            "where",
+            "which",
+            "summarize",
+            "summary",
+            "section",
+            "city",
+            "county",
+            "code",
+            "ordinance",
+            "ordinances",
+            "after",
+            "before",
+            "during",
+            "between",
+            "within",
+            "without",
+            "says",
+            "say",
+        }
+        return [
+            term
+            for term in re.findall(r"[a-z0-9]+", (query or "").lower())
+            if len(term) > 2 and term not in stop_words
+        ]
 
     def _build_navigation_payload(
         self,

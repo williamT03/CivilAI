@@ -15,7 +15,7 @@ import fitz
 # Reuse the normalized relational and vector storage layers built earlier.
 try:
     from DB import DatabaseManager
-    from chroma import ChromaManager
+    from chroma import ChromaManager, create_runtime_vector_manager
 except ImportError:  # pragma: no cover - fallback for direct script execution
     import sys
 
@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - fallback for direct script execution
         sys.path.append(str(repo_root))
 
     from backend.CustomRAG.db_scripts.DB import DatabaseManager
-    from backend.CustomRAG.db_scripts.chroma import ChromaManager
+    from backend.CustomRAG.db_scripts.chroma import ChromaManager, create_runtime_vector_manager
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +371,7 @@ class ParserComponentFactory:
 
     @staticmethod
     def create_chroma_manager(paths: ParserPaths, db_manager: DatabaseManager) -> ChromaManager:
-        return ChromaManager(
+        return create_runtime_vector_manager(
             persist_directory=paths.chroma_dir,
             db_manager=db_manager,
         )
@@ -457,12 +457,29 @@ class OrdinancePdfParser:
             results.append(self.parse_pdf(pdf_path, replace_existing=replace_existing))
         return results
 
-    def parse_uploaded_pdf(self, pdf_path: str | Path, replace_existing: bool = True) -> dict:
+    def parse_uploaded_pdf(
+        self,
+        pdf_path: str | Path,
+        replace_existing: bool = True,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
+    ) -> dict:
         """Parse one uploaded PDF immediately after it is saved by the website."""
 
-        return self.parse_pdf(pdf_path, replace_existing=replace_existing)
+        return self.parse_pdf(
+            pdf_path,
+            replace_existing=replace_existing,
+            owner_user_id=owner_user_id,
+            visibility=visibility,
+        )
 
-    def parse_pdf(self, pdf_path: str | Path, replace_existing: bool = True) -> dict:
+    def parse_pdf(
+        self,
+        pdf_path: str | Path,
+        replace_existing: bool = True,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
+    ) -> dict:
         """Parse one PDF, persist it to SQL/Chroma, and emit a JSON artifact."""
 
         resolved_pdf_path = Path(pdf_path)
@@ -509,6 +526,8 @@ class OrdinancePdfParser:
             document_title=profile.document_title,
             chapters=chapters,
             source_filename=profile.source_filename,
+            owner_user_id=owner_user_id,
+            visibility=visibility,
             replace_existing=replace_existing,
             persist_relational=True,
         )
@@ -517,6 +536,8 @@ class OrdinancePdfParser:
             "document_title": profile.document_title,
             "document_slug": document_slug,
             "source_filename": profile.source_filename,
+            "owner_user_id": owner_user_id,
+            "visibility": visibility,
             "detected_layout": profile.layout,
             "toc_start_page": profile.toc_start_page,
             "toc_end_page": profile.toc_end_page,

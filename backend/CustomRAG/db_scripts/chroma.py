@@ -3,7 +3,9 @@ from __future__ import annotations
 # Standard library utilities are enough for deterministic test embeddings and
 # basic path management.
 import hashlib
+import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -14,9 +16,28 @@ import chromadb
 # NumPy makes it easy to normalize vectors and to keep query/upsert payloads tidy.
 import numpy as np
 
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover - runtime dependency fallback
+    SentenceTransformer = None
+
+try:
+    from backend.app.ai.providers import get_ai_router
+    from backend.app.core.config import get_settings
+except ImportError:  # pragma: no cover - direct script execution fallback
+    try:
+        from app.ai.providers import get_ai_router
+        from app.core.config import get_settings
+    except ImportError:  # pragma: no cover
+        get_ai_router = None
+        get_settings = None
+
 # Reuse the normalized structural blueprint from DB.py so the relational and
 # vector layers always operate on the exact same in-memory hierarchy.
-from DB import DatabaseManager, DocumentDefinition, DocumentSchemaBuilder
+try:
+    from .DB import DatabaseManager, DocumentDefinition, DocumentSchemaBuilder
+except ImportError:
+    from DB import DatabaseManager, DocumentDefinition, DocumentSchemaBuilder
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +185,8 @@ class ChromaDocumentBuilder:
                 "document_slug": blueprint.document_slug,
                 "document_title": blueprint.document_title,
                 "source_filename": blueprint.source_filename or "",
+                "owner_user_id": blueprint.owner_user_id or "",
+                "visibility": blueprint.visibility or "public",
                 "chapter_count": len(blueprint.chapters),
             },
             embedding=self.embedding_provider(text_body),
@@ -185,6 +208,8 @@ class ChromaDocumentBuilder:
                 "node_type": "chapter",
                 "document_slug": blueprint.document_slug,
                 "document_title": blueprint.document_title,
+                "owner_user_id": blueprint.owner_user_id or "",
+                "visibility": blueprint.visibility or "public",
                 "chapter_number": chapter.chapter_number,
                 "chapter_name": chapter.chapter_name,
                 "toc_page": chapter.toc_page or 0,
@@ -220,6 +245,8 @@ class ChromaDocumentBuilder:
                 "node_type": "section",
                 "document_slug": blueprint.document_slug,
                 "document_title": blueprint.document_title,
+                "owner_user_id": blueprint.owner_user_id or "",
+                "visibility": blueprint.visibility or "public",
                 "chapter_number": chapter.chapter_number,
                 "chapter_name": chapter.chapter_name,
                 "section_number": section.section_number,
@@ -250,6 +277,8 @@ class ChromaDocumentBuilder:
                 "node_type": "subsection",
                 "document_slug": blueprint.document_slug,
                 "document_title": blueprint.document_title,
+                "owner_user_id": blueprint.owner_user_id or "",
+                "visibility": blueprint.visibility or "public",
                 "chapter_number": chapter.chapter_number,
                 "chapter_name": chapter.chapter_name,
                 "section_number": section.section_number,
@@ -291,6 +320,62 @@ class ChromaDocumentBuilder:
         value = re.sub(r"[^a-z0-9]+", "_", value)
         value = value.strip("_")
         return value or "unknown"
+
+
+class SentenceTransformerEmbeddingProvider:
+    """Lazy runtime embedding provider backed by a real sentence-transformer model."""
+
+    def __init__(self, model_name: str | None = None) -> None:
+        self.model_name = model_name or os.getenv(
+            "CUSTOM_RAG_EMBED_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )
+        self._model = None
+
+    def __call__(self, text: str) -> list[float]:
+        model = self._load_model()
+        embedding = model.encode(
+            text or "",
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return np.asarray(embedding, dtype=np.float32).tolist()
+
+    def _load_model(self):
+        if self._model is not None:
+            return self._model
+
+        if SentenceTransformer is None:
+            raise RuntimeError(
+                "sentence-transformers is not installed, so runtime embeddings cannot be created."
+            )
+
+        self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+
+class RoutedEmbeddingProvider:
+    """Embedding provider that uses the configured SaaS AI embedding route."""
+
+    def __call__(self, text: str) -> list[float]:
+        if get_ai_router is None:
+            raise RuntimeError("AI provider router is not available for embeddings.")
+        return get_ai_router().embed_batch([text], endpoint="ingestion").embeddings[0]
+
+
+def create_runtime_chroma_builder(model_name: str | None = None) -> ChromaDocumentBuilder:
+    """
+    Build the production Chroma builder that uses real semantic embeddings.
+
+    Tests can keep using the deterministic default builder by instantiating
+    `ChromaDocumentBuilder()` directly.
+    """
+
+    embedding_provider_name = os.getenv("AI_EMBEDDING_PROVIDER", "").strip().lower()
+    if embedding_provider_name in {"openai", "deepseek"}:
+        return ChromaDocumentBuilder(embedding_provider=RoutedEmbeddingProvider())
+
+    return ChromaDocumentBuilder(embedding_provider=SentenceTransformerEmbeddingProvider(model_name=model_name))
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +421,8 @@ class ChromaManager:
         document_title: str,
         chapters: list[dict],
         source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
         replace_existing: bool = True,
         persist_relational: bool = True,
     ) -> dict:
@@ -352,6 +439,8 @@ class ChromaManager:
                 document_title=document_title,
                 chapters=chapters,
                 source_filename=source_filename,
+                owner_user_id=owner_user_id,
+                visibility=visibility,
             )
         else:
             # If Chroma is being used on its own, we still build the hierarchy
@@ -363,6 +452,8 @@ class ChromaManager:
                     document_title=document_title,
                     chapters=chapters,
                     source_filename=source_filename,
+                    owner_user_id=owner_user_id,
+                    visibility=visibility,
                 )
                 .build()
             )
@@ -440,12 +531,20 @@ class ChromaManager:
 
         # Embed the query text with the same builder-backed embedding logic.
         query_embedding = self.builder.embedding_provider(query_text)
-        response = self.collections[collection_name].query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where or None,
-            include=["documents", "metadatas", "distances"],
-        )
+        try:
+            response = self.collections[collection_name].query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where or None,
+                include=["documents", "metadatas", "distances"],
+            )
+        except chromadb.errors.InvalidArgumentError as error:
+            # Older local stores may still hold the deterministic 64-d test
+            # embeddings. When that happens we fall back to the SQL/keyword path
+            # instead of crashing the chat endpoint outright.
+            if "dimension" in str(error).lower():
+                return []
+            raise
 
         # Repackage the raw Chroma response into a friendlier list-of-dicts shape.
         ids = response.get("ids", [[]])[0]
@@ -510,3 +609,263 @@ class ChromaManager:
             except Exception:
                 pass
         return 5000
+
+
+class QdrantStructuredManager:
+    """Qdrant-backed manager with the same interface used by the retrieval toolkit."""
+
+    def __init__(
+        self,
+        persist_directory: str | Path = "backend/Data/chroma_db",
+        db_manager: DatabaseManager | None = None,
+        builder: ChromaDocumentBuilder | None = None,
+    ) -> None:
+        if get_settings is None:
+            raise RuntimeError("CivilAI settings are required for Qdrant vector storage.")
+
+        from qdrant_client import QdrantClient
+
+        settings = get_settings()
+        self.db_manager = db_manager
+        self.builder = builder or ChromaDocumentBuilder()
+        self.client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        self.collection_names = {
+            ChromaCollectionFactory.DOCUMENT_COLLECTION,
+            ChromaCollectionFactory.CHAPTER_COLLECTION,
+            ChromaCollectionFactory.SECTION_COLLECTION,
+            ChromaCollectionFactory.SUBSECTION_COLLECTION,
+        }
+
+    def sync_document(
+        self,
+        document_title: str,
+        chapters: list[dict],
+        source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
+        replace_existing: bool = True,
+        persist_relational: bool = True,
+    ) -> dict:
+        if self.db_manager is not None:
+            blueprint = self.db_manager.build_document_blueprint(
+                document_title=document_title,
+                chapters=chapters,
+                source_filename=source_filename,
+                owner_user_id=owner_user_id,
+                visibility=visibility,
+            )
+        else:
+            blueprint = (
+                DocumentSchemaBuilder()
+                .from_nested_payload(
+                    document_title=document_title,
+                    chapters=chapters,
+                    source_filename=source_filename,
+                    owner_user_id=owner_user_id,
+                    visibility=visibility,
+                )
+                .build()
+            )
+
+        if persist_relational:
+            manager = self.db_manager or DatabaseManager()
+            try:
+                manager.persist_document_blueprint(blueprint, replace_existing=replace_existing)
+            finally:
+                if self.db_manager is None:
+                    manager.close()
+
+        return self.upsert_document_blueprint(blueprint, replace_existing=replace_existing)
+
+    def upsert_document_blueprint(
+        self,
+        blueprint: DocumentDefinition,
+        replace_existing: bool = True,
+    ) -> dict:
+        if replace_existing:
+            self.delete_document(blueprint.document_slug)
+
+        payload = self.builder.from_document_blueprint(blueprint)
+        for collection_name, nodes in payload.nodes_by_collection.items():
+            self._upsert_nodes(collection_name, nodes)
+
+        return {
+            "document_title": payload.document_title,
+            "document_slug": payload.document_slug,
+            "vector_backend": "qdrant",
+            "collection_counts": {
+                collection_name: len(nodes)
+                for collection_name, nodes in payload.nodes_by_collection.items()
+            },
+        }
+
+    def delete_document(self, document_title_or_slug: str) -> None:
+        from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
+
+        document_slug = DatabaseManager.make_slug(document_title_or_slug)
+        for collection_name in self.collection_names:
+            try:
+                if not self._collection_exists(collection_name):
+                    continue
+                self.client.delete(
+                    collection_name=collection_name,
+                    points_selector=FilterSelector(
+                        filter=Filter(
+                            must=[
+                                FieldCondition(
+                                    key="document_slug",
+                                    match=MatchValue(value=document_slug),
+                                )
+                            ]
+                        )
+                    ),
+                )
+            except Exception:
+                continue
+
+    def list_collections(self) -> list[str]:
+        return sorted(self.collection_names)
+
+    def collection_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for collection_name in self.collection_names:
+            if not self._collection_exists(collection_name):
+                counts[collection_name] = 0
+                continue
+            try:
+                counts[collection_name] = int(self.client.count(collection_name=collection_name).count)
+            except Exception:
+                counts[collection_name] = 0
+        return counts
+
+    def query_collection(
+        self,
+        collection_name: str,
+        query_text: str,
+        n_results: int = 5,
+        where: dict | None = None,
+    ) -> list[dict]:
+        if collection_name not in self.collection_names:
+            raise ValueError(f"Unknown collection: {collection_name}")
+        if not self._collection_exists(collection_name):
+            return []
+
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        query_embedding = self.builder.embedding_provider(query_text)
+        query_filter = None
+        if where:
+            query_filter = Filter(
+                must=[
+                    FieldCondition(key=str(key), match=MatchValue(value=value))
+                    for key, value in where.items()
+                ]
+            )
+
+        try:
+            response = self.client.query_points(
+                collection_name=collection_name,
+                query=query_embedding,
+                limit=n_results,
+                query_filter=query_filter,
+                with_payload=True,
+            )
+        except Exception:
+            return []
+
+        results: list[dict] = []
+        for point in response.points:
+            payload = dict(point.payload or {})
+            document = str(payload.pop("document", ""))
+            metadata = {
+                key: value
+                for key, value in payload.items()
+                if key not in {"node_id"}
+            }
+            results.append(
+                {
+                    "id": str(payload.get("node_id") or point.id),
+                    "document": document,
+                    "metadata": metadata,
+                    "distance": max(0.0, 1.0 - float(point.score or 0.0)),
+                    "score": float(point.score or 0.0),
+                }
+            )
+        return results
+
+    def _upsert_nodes(self, collection_name: str, nodes: list[ChromaNode]) -> None:
+        if not nodes:
+            return
+
+        from qdrant_client.models import PointStruct
+
+        self._ensure_collection(collection_name, vector_size=len(nodes[0].embedding))
+        points = [
+            PointStruct(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, node.node_id)),
+                vector=node.embedding,
+                payload={
+                    "node_id": node.node_id,
+                    "document": node.document,
+                    **self._normalize_metadata(node.metadata),
+                },
+            )
+            for node in nodes
+        ]
+        self.client.upsert(collection_name=collection_name, points=points)
+
+    def _ensure_collection(self, collection_name: str, vector_size: int) -> None:
+        if self._collection_exists(collection_name):
+            return
+
+        from qdrant_client.models import Distance, VectorParams
+
+        self.client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+        )
+
+    def _collection_exists(self, collection_name: str) -> bool:
+        try:
+            return bool(self.client.collection_exists(collection_name=collection_name))
+        except AttributeError:
+            try:
+                self.client.get_collection(collection_name=collection_name)
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    def _normalize_metadata(self, metadata: dict[str, str | int | float | bool]) -> dict[str, str | int | float | bool]:
+        normalized: dict[str, str | int | float | bool] = {}
+        for key, value in metadata.items():
+            if value is None:
+                normalized[key] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                normalized[key] = value
+            else:
+                normalized[key] = str(value)
+        return normalized
+
+
+def create_runtime_vector_manager(
+    persist_directory: str | Path = "backend/Data/chroma_db",
+    db_manager: DatabaseManager | None = None,
+    builder: ChromaDocumentBuilder | None = None,
+):
+    """Create the configured vector manager while preserving the old interface."""
+
+    backend = os.getenv("VECTOR_STORE_BACKEND", "chroma").strip().lower()
+    if backend == "qdrant":
+        return QdrantStructuredManager(
+            persist_directory=persist_directory,
+            db_manager=db_manager,
+            builder=builder or create_runtime_chroma_builder(),
+        )
+
+    return ChromaManager(
+        persist_directory=persist_directory,
+        db_manager=db_manager,
+        builder=builder or create_runtime_chroma_builder(),
+    )

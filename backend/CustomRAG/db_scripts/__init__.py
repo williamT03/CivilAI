@@ -20,6 +20,8 @@ from .chroma import (
     ChromaDocumentPayload,
     ChromaManager,
     ChromaNode,
+    SentenceTransformerEmbeddingProvider,
+    create_runtime_chroma_builder,
 )
 
 try:
@@ -50,11 +52,13 @@ __all__ = [
     "ChromaDocumentPayload",
     "ChromaManager",
     "ChromaNode",
+    "SentenceTransformerEmbeddingProvider",
     "DatabaseManager",
     "DocumentDefinition",
     "DocumentSchemaBuilder",
     "SectionDefinition",
     "SubsectionDefinition",
+    "create_runtime_chroma_builder",
 ]
 
 if PARSER_IMPORT_ERROR is None:

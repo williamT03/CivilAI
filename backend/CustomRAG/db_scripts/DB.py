@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     delete,
+    event,
     insert,
     select,
     text,
@@ -81,6 +82,10 @@ class DocumentDefinition:
     document_slug: str
     # Optional original filename so uploads/parsers can preserve provenance.
     source_filename: str | None = None
+    # Nullable owner. Public municipal defaults keep this empty.
+    owner_user_id: str | None = None
+    # `public` documents are shared; `private` documents are visible only to owner.
+    visibility: str = "public"
     # The chapter rows that belong to this document.
     chapters: list[ChapterDefinition] = field(default_factory=list)
 
@@ -102,13 +107,27 @@ class DocumentSchemaBuilder:
         self._document_title: str | None = None
         self._document_slug: str | None = None
         self._source_filename: str | None = None
+        self._owner_user_id: str | None = None
+        self._visibility: str = "public"
         self._chapters: list[ChapterDefinition] = []
 
-    def set_document(self, document_title: str, source_filename: str | None = None) -> "DocumentSchemaBuilder":
+    def set_document(
+        self,
+        document_title: str,
+        source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
+    ) -> "DocumentSchemaBuilder":
         # Store the root document metadata once so every child node rolls up under it.
         self._document_title = document_title.strip()
-        self._document_slug = DatabaseManager.make_slug(document_title)
+        base_slug = DatabaseManager.make_slug(document_title)
+        if owner_user_id and visibility == "private":
+            self._document_slug = f"{base_slug}__user_{DatabaseManager.make_slug(str(owner_user_id))}"
+        else:
+            self._document_slug = base_slug
         self._source_filename = source_filename
+        self._owner_user_id = owner_user_id
+        self._visibility = visibility if visibility in {"public", "private"} else "public"
         return self
 
     def add_chapter(
@@ -135,15 +154,24 @@ class DocumentSchemaBuilder:
         document_title: str,
         chapters: Iterable[dict],
         source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
     ) -> "DocumentSchemaBuilder":
         # Reset the document context so one builder instance can be reused cleanly.
         self._document_title = None
         self._document_slug = None
         self._source_filename = None
+        self._owner_user_id = None
+        self._visibility = "public"
         self._chapters = []
 
         # Seed the root document node first.
-        self.set_document(document_title=document_title, source_filename=source_filename)
+        self.set_document(
+            document_title=document_title,
+            source_filename=source_filename,
+            owner_user_id=owner_user_id,
+            visibility=visibility,
+        )
 
         # Walk the nested parser payload and normalize it into dataclasses.
         for raw_chapter in chapters:
@@ -222,6 +250,8 @@ class DocumentSchemaBuilder:
             document_title=self._document_title,
             document_slug=self._document_slug,
             source_filename=self._source_filename,
+            owner_user_id=self._owner_user_id,
+            visibility=self._visibility,
             chapters=finalized_chapters,
         )
 
@@ -247,6 +277,8 @@ class RelationalSchemaFactory:
             Column("document_title", String(255), nullable=False),
             Column("document_slug", String(255), nullable=False, unique=True),
             Column("source_filename", String(255), nullable=True),
+            Column("owner_user_id", String(64), nullable=True),
+            Column("visibility", String(32), nullable=False, default="public"),
         )
 
         # The chapters table hangs off documents and stores the top-level TOC view.
@@ -315,6 +347,12 @@ class DatabaseManager:
         # `future=True` keeps us on the modern SQLAlchemy execution model.
         self.engine = create_engine(db_url, future=True)
 
+        # SQLite does not enforce foreign-key cascades unless the pragma is
+        # enabled on every connection. Turning it on here keeps reparse cleanup
+        # predictable and prevents stale children from piling up.
+        if self.engine.url.get_backend_name() == "sqlite":
+            event.listen(self.engine, "connect", self._enable_sqlite_foreign_keys)
+
         # Metadata holds the in-memory description of the fixed relational schema.
         self.metadata = MetaData()
 
@@ -329,6 +367,11 @@ class DatabaseManager:
 
         # This is idempotent, so calling it repeatedly is safe.
         self.metadata.create_all(self.engine)
+        self._ensure_document_tenant_columns()
+
+        # Older local databases may have been created before foreign-key cleanup
+        # was enforced, so we opportunistically remove stale rows at startup.
+        self.purge_orphaned_rows()
 
     def close(self) -> None:
         """Release pooled DB connections, which is especially important for SQLite on Windows."""
@@ -345,6 +388,8 @@ class DatabaseManager:
         document_title: str,
         chapters: Iterable[dict],
         source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
     ) -> DocumentDefinition:
         """Normalize a raw nested parser payload into a validated document blueprint."""
 
@@ -354,6 +399,8 @@ class DatabaseManager:
                 document_title=document_title,
                 chapters=chapters,
                 source_filename=source_filename,
+                owner_user_id=owner_user_id,
+                visibility=visibility,
             )
             .build()
         )
@@ -364,6 +411,8 @@ class DatabaseManager:
         chapters: Iterable[dict],
         replace_existing: bool = True,
         source_filename: str | None = None,
+        owner_user_id: str | None = None,
+        visibility: str = "public",
     ) -> dict:
         """
         Persist one document hierarchy into the normalized schema.
@@ -378,6 +427,8 @@ class DatabaseManager:
             document_title=document_title,
             chapters=chapters,
             source_filename=source_filename,
+            owner_user_id=owner_user_id,
+            visibility=visibility,
         )
 
         return self.persist_document_blueprint(blueprint, replace_existing=replace_existing)
@@ -391,7 +442,8 @@ class DatabaseManager:
 
         # If we are replacing the document, remove its existing hierarchy first.
         if replace_existing:
-            self.drop_document_schema(blueprint.document_title)
+            self.drop_document_schema(blueprint.document_slug)
+            self.purge_orphaned_rows()
 
         documents = self.tables["documents"]
         chapters_table = self.tables["chapters"]
@@ -405,6 +457,8 @@ class DatabaseManager:
                     document_title=blueprint.document_title,
                     document_slug=blueprint.document_slug,
                     source_filename=blueprint.source_filename,
+                    owner_user_id=blueprint.owner_user_id,
+                    visibility=blueprint.visibility,
                 )
             ).inserted_primary_key[0]
 
@@ -445,6 +499,8 @@ class DatabaseManager:
         return {
             "document_title": blueprint.document_title,
             "document_slug": blueprint.document_slug,
+            "owner_user_id": blueprint.owner_user_id,
+            "visibility": blueprint.visibility,
             "chapter_count": len(blueprint.chapters),
             "section_count": sum(len(chapter.sections) for chapter in blueprint.chapters),
             "subsection_count": sum(
@@ -455,21 +511,130 @@ class DatabaseManager:
         }
 
     def drop_document_schema(self, document_title_or_slug: str) -> None:
-        """Delete one document and let cascading foreign keys remove its children."""
+        """Delete one document and explicitly clear its child hierarchy."""
 
         documents = self.tables["documents"]
+        chapters = self.tables["chapters"]
+        sections = self.tables["sections"]
+        subsections = self.tables["subsections"]
         document_slug = self.make_slug(document_title_or_slug)
 
         with self.engine.begin() as connection:
-            # We match on either the exact title or the normalized slug so callers can use whichever is easier.
+            # Resolve matching document ids first so we can clean children even
+            # if older SQLite files were created without enforced cascades.
+            document_ids = list(
+                connection.execute(
+                    select(documents.c.id).where(
+                        (documents.c.document_title == document_title_or_slug)
+                        | (documents.c.document_slug == document_title_or_slug)
+                        | (documents.c.document_slug == document_slug)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            if not document_ids:
+                return
+
+            chapter_ids = list(
+                connection.execute(
+                    select(chapters.c.id).where(chapters.c.document_id.in_(document_ids))
+                )
+                .scalars()
+                .all()
+            )
+
+            section_ids: list[int] = []
+            if chapter_ids:
+                section_ids = list(
+                    connection.execute(
+                        select(sections.c.id).where(sections.c.chapter_id.in_(chapter_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+
+            if section_ids:
+                connection.execute(delete(subsections).where(subsections.c.section_id.in_(section_ids)))
+
+            if chapter_ids:
+                connection.execute(delete(sections).where(sections.c.chapter_id.in_(chapter_ids)))
+                connection.execute(delete(chapters).where(chapters.c.document_id.in_(document_ids)))
+
+            connection.execute(delete(documents).where(documents.c.id.in_(document_ids)))
+
+    def purge_orphaned_rows(self) -> None:
+        """Remove child rows whose parents no longer exist."""
+
+        chapters = self.tables["chapters"]
+        sections = self.tables["sections"]
+        subsections = self.tables["subsections"]
+
+        with self.engine.begin() as connection:
+            # Delete bottom-up so each pass leaves the remaining hierarchy valid.
             connection.execute(
-                delete(documents).where(
-                    (documents.c.document_title == document_title_or_slug)
-                    | (documents.c.document_slug == document_slug)
+                delete(subsections).where(
+                    ~subsections.c.section_id.in_(select(sections.c.id))
+                )
+            )
+            connection.execute(
+                delete(sections).where(
+                    ~sections.c.chapter_id.in_(select(chapters.c.id))
+                )
+            )
+            connection.execute(
+                delete(chapters).where(
+                    ~chapters.c.document_id.in_(select(self.tables["documents"].c.id))
                 )
             )
 
-    def fetch_document_hierarchy(self, document_title_or_slug: str) -> dict | None:
+    def _ensure_document_tenant_columns(self) -> None:
+        """Add tenant columns to older local structured databases."""
+
+        documents = self.tables["documents"]
+        inspector = sqlalchemy.inspect(self.engine)
+        try:
+            existing_columns = {column["name"] for column in inspector.get_columns("documents")}
+        except sqlalchemy.exc.NoSuchTableError:
+            return
+
+        with self.engine.begin() as connection:
+            if "owner_user_id" not in existing_columns:
+                connection.execute(text("ALTER TABLE documents ADD COLUMN owner_user_id VARCHAR(64)"))
+            if "visibility" not in existing_columns:
+                connection.execute(text("ALTER TABLE documents ADD COLUMN visibility VARCHAR(32) DEFAULT 'public'"))
+            connection.execute(
+                documents.update()
+                .where((documents.c.visibility == None) | (documents.c.visibility == ""))  # noqa: E711
+                .values(visibility="public")
+            )
+
+    def reset_structured_storage(self) -> None:
+        """Wipe the structured hierarchy so a full reparse starts from a clean slate."""
+
+        documents = self.tables["documents"]
+        chapters = self.tables["chapters"]
+        sections = self.tables["sections"]
+        subsections = self.tables["subsections"]
+
+        with self.engine.begin() as connection:
+            connection.execute(delete(subsections))
+            connection.execute(delete(sections))
+            connection.execute(delete(chapters))
+            connection.execute(delete(documents))
+
+        self.purge_orphaned_rows()
+
+    @staticmethod
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        """Enable SQLite foreign keys on every new DB-API connection."""
+
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    def fetch_document_hierarchy(self, document_title_or_slug: str, user_id: str | None = None) -> dict | None:
         """Return one document as a nested dictionary for debugging or API responses."""
 
         documents = self.tables["documents"]
@@ -482,8 +647,12 @@ class DatabaseManager:
             # Resolve the root document row first.
             document_row = connection.execute(
                 select(documents).where(
-                    (documents.c.document_title == document_title_or_slug)
-                    | (documents.c.document_slug == document_slug)
+                    (
+                        (documents.c.document_title == document_title_or_slug)
+                        | (documents.c.document_slug == document_title_or_slug)
+                        | (documents.c.document_slug == document_slug)
+                    ),
+                    self._tenant_visibility_filter(documents, user_id),
                 )
             ).mappings().first()
 
@@ -546,10 +715,12 @@ class DatabaseManager:
             "document_title": document_row["document_title"],
             "document_slug": document_row["document_slug"],
             "source_filename": document_row["source_filename"],
+            "owner_user_id": document_row.get("owner_user_id"),
+            "visibility": document_row.get("visibility") or "public",
             "chapters": chapter_payloads,
         }
 
-    def list_documents(self) -> list[dict]:
+    def list_documents(self, user_id: str | None = None) -> list[dict]:
         """Return a compact list of documents currently stored in the database."""
 
         documents = self.tables["documents"]
@@ -562,16 +733,19 @@ class DatabaseManager:
                     documents.c.document_title,
                     documents.c.document_slug,
                     documents.c.source_filename,
+                    documents.c.owner_user_id,
+                    documents.c.visibility,
                     sqlalchemy.func.count(chapters.c.id).label("chapter_count"),
                 )
                 .select_from(documents.outerjoin(chapters, chapters.c.document_id == documents.c.id))
+                .where(self._tenant_visibility_filter(documents, user_id))
                 .group_by(documents.c.id)
                 .order_by(documents.c.document_title)
             ).mappings().all()
 
         return [dict(row) for row in rows]
 
-    def resolve_document(self, document_title_or_slug: str) -> dict | None:
+    def resolve_document(self, document_title_or_slug: str, user_id: str | None = None) -> dict | None:
         """Resolve one stored document row from either its human title or its slug."""
 
         documents = self.tables["documents"]
@@ -582,8 +756,12 @@ class DatabaseManager:
             # do not need to care which representation they currently have.
             row = connection.execute(
                 select(documents).where(
-                    (documents.c.document_title == document_title_or_slug)
-                    | (documents.c.document_slug == document_slug)
+                    (
+                        (documents.c.document_title == document_title_or_slug)
+                        | (documents.c.document_slug == document_title_or_slug)
+                        | (documents.c.document_slug == document_slug)
+                    ),
+                    self._tenant_visibility_filter(documents, user_id),
                 )
             ).mappings().first()
 
@@ -594,10 +772,11 @@ class DatabaseManager:
         document_title_or_slug: str,
         section_numbers: Sequence[str] | None = None,
         chapter_number: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         """Return section rows joined with their document and chapter context."""
 
-        document_row = self.resolve_document(document_title_or_slug)
+        document_row = self.resolve_document(document_title_or_slug, user_id=user_id)
         if document_row is None:
             return []
 
@@ -620,6 +799,8 @@ class DatabaseManager:
                     documents.c.document_title,
                     documents.c.document_slug,
                     documents.c.source_filename,
+                    documents.c.owner_user_id,
+                    documents.c.visibility,
                     chapters.c.id.label("chapter_id"),
                     chapters.c.chapter_number,
                     chapters.c.chapter_name,
@@ -666,6 +847,8 @@ class DatabaseManager:
                         "document_title": section_row["document_title"],
                         "document_slug": section_row["document_slug"],
                         "source_filename": section_row["source_filename"],
+                        "owner_user_id": section_row.get("owner_user_id"),
+                        "visibility": section_row.get("visibility") or "public",
                         "chapter_number": section_row["chapter_number"],
                         "chapter_name": section_row["chapter_name"],
                         "toc_page": section_row["toc_page"],
@@ -685,10 +868,11 @@ class DatabaseManager:
         document_title_or_slug: str,
         section_number: str,
         subsection_numbers: Sequence[str] | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         """Return subsection rows joined with their parent section, chapter, and document."""
 
-        document_row = self.resolve_document(document_title_or_slug)
+        document_row = self.resolve_document(document_title_or_slug, user_id=user_id)
         if document_row is None:
             return []
 
@@ -709,6 +893,8 @@ class DatabaseManager:
                     documents.c.document_title,
                     documents.c.document_slug,
                     documents.c.source_filename,
+                    documents.c.owner_user_id,
+                    documents.c.visibility,
                     chapters.c.chapter_number,
                     chapters.c.chapter_name,
                     chapters.c.toc_page,
@@ -740,6 +926,113 @@ class DatabaseManager:
 
         return [dict(subsection_row) for subsection_row in subsection_rows]
 
+    def search_sections_by_query_terms(
+        self,
+        document_title_or_slug: str,
+        query: str,
+        limit: int = 10,
+        user_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Score sections lexically against a free-text query.
+
+        This gives the retrieval stack a cheap keyword path for ordinance-style
+        questions such as "noise after 9 p.m." where exact section references do
+        not exist and semantic vector search alone may drift.
+        """
+
+        document_row = self.resolve_document(document_title_or_slug, user_id=user_id)
+        if document_row is None:
+            return []
+
+        document_terms = self._extract_document_terms(
+            " ".join(
+                part
+                for part in (
+                    document_row.get("document_title", ""),
+                    document_row.get("document_slug", "").replace("_", " "),
+                    document_row.get("source_filename", ""),
+                )
+                if part
+            )
+        )
+        search_terms = self._extract_search_terms(query, excluded_terms=document_terms)
+        if not search_terms:
+            # If the query only contained jurisdiction-like words, fall back to
+            # a broader extraction so we still return something deterministic.
+            search_terms = self._extract_search_terms(query)
+            if not search_terms:
+                return []
+
+        section_rows = self.find_sections(document_title_or_slug=document_title_or_slug)
+        scored_rows: list[dict] = []
+
+        for section_row in section_rows:
+            haystack_parts = [
+                section_row.get("chapter_name", ""),
+                section_row.get("section_number", ""),
+                section_row.get("section_summary", ""),
+                section_row.get("section_text", ""),
+                " ".join(
+                    (
+                        subsection.get("subsection_text")
+                        or subsection.get("subsection_summary")
+                        or ""
+                    ).strip()
+                    for subsection in section_row.get("subsections", [])
+                    if (
+                        subsection.get("subsection_text")
+                        or subsection.get("subsection_summary")
+                        or ""
+                    ).strip()
+                ),
+            ]
+            haystack = " ".join(haystack_parts).lower()
+
+            matched_terms = [term for term in search_terms if term in haystack]
+            if not matched_terms:
+                continue
+
+            score = len(matched_terms) / max(len(search_terms), 1)
+
+            # Reward exact phrase overlap and matches in the section/chapter labels
+            # because ordinance queries often quote a heading or a short rule name.
+            normalized_query = " ".join(search_terms)
+            if normalized_query and normalized_query in haystack:
+                score += 0.25
+
+            label_haystack = " ".join(
+                [
+                    section_row.get("chapter_name", ""),
+                    section_row.get("section_number", ""),
+                    section_row.get("section_summary", ""),
+                ]
+            ).lower()
+            label_matches = sum(1 for term in matched_terms if term in label_haystack)
+            score += min(label_matches * 0.08, 0.24)
+
+            # Reward repeated topic terms inside the body because ordinance
+            # sections that truly govern a subject tend to repeat its key noun.
+            term_frequency = sum(haystack.count(term) for term in matched_terms)
+            score += min(term_frequency * 0.02, 0.24)
+
+            scored_rows.append(
+                {
+                    **section_row,
+                    "matched_terms": matched_terms,
+                    "lexical_score": round(score, 4),
+                }
+            )
+
+        scored_rows.sort(
+            key=lambda row: (
+                float(row.get("lexical_score", 0.0)),
+                len(row.get("section_text", "") or ""),
+            ),
+            reverse=True,
+        )
+        return scored_rows[:limit]
+
     def list_sections_for_chapter(self, document_title_or_slug: str, chapter_number: str) -> list[dict]:
         """Return every section stored under one chapter number for a document."""
 
@@ -748,10 +1041,72 @@ class DatabaseManager:
             chapter_number=chapter_number,
         )
 
+    @staticmethod
+    def _tenant_visibility_filter(documents: Table, user_id: str | None):
+        public_filter = (documents.c.visibility == "public") | (documents.c.visibility == None)  # noqa: E711
+        if user_id:
+            return public_filter | (documents.c.owner_user_id == str(user_id))
+        return public_filter
+
     def list_tables(self) -> list[str]:
         """Return the physical SQL tables that exist in the current database."""
 
         return sorted(sqlalchemy.inspect(self.engine).get_table_names())
+
+    @staticmethod
+    def _extract_search_terms(query: str, excluded_terms: set[str] | None = None) -> list[str]:
+        stop_words = {
+            "what",
+            "does",
+            "about",
+            "that",
+            "this",
+            "with",
+            "from",
+            "into",
+            "when",
+            "where",
+            "which",
+            "summarize",
+            "summary",
+            "section",
+            "city",
+            "county",
+            "code",
+            "ordinance",
+            "ordinances",
+            "florida",
+            "state",
+            "states",
+            "say",
+            "says",
+            "tell",
+            "show",
+            "after",
+            "before",
+            "during",
+            "between",
+            "within",
+            "without",
+        }
+
+        excluded_lookup = {term.lower() for term in (excluded_terms or set()) if term}
+
+        return [
+            term
+            for term in re.findall(r"[a-z0-9]+", (query or "").lower())
+            if len(term) > 2 and term not in stop_words and term not in excluded_lookup
+        ]
+
+    @staticmethod
+    def _extract_document_terms(raw_value: str) -> set[str]:
+        """Return normalized lookup terms that are intrinsic to the document title."""
+
+        return {
+            term
+            for term in re.findall(r"[a-z0-9]+", (raw_value or "").lower())
+            if len(term) > 2
+        }
 
     @staticmethod
     def make_slug(raw_value: str) -> str:
