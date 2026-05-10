@@ -30,7 +30,7 @@ Use these Cloudflare Pages settings:
 Set these environment variables in Cloudflare Pages:
 
 ```env
-NEXT_PUBLIC_API_BASE=https://your-backend-domain
+NEXT_PUBLIC_API_BASE=https://api.civilai.willcloudlab.com
 NEXT_PUBLIC_ENABLE_LLAMA=false
 ```
 

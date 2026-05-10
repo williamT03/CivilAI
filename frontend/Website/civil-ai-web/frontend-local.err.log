@@ -27,3 +27,4 @@
     at J1.n.WebSocket.handleMessage (file://C:/Users/drago/Documents/Coding assignments/CivilAI/frontend/Website/civil-ai-web/.next/dev/static/chunks/node_modules_next_dist_client_0fhqo1d._.js:13335:52) (file://C:/Users/drago/Documents/Coding assignments/CivilAI/frontend/Website/civil-ai-web/.next/dev/static/chunks/node_modules_next_dist_client_0fhqo1d._.js:8005:21)
 ⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
 ⚠ Fast Refresh had to perform a full reload when ./app/context/AuthContext.tsx changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+⚠ Fast Refresh had to perform a full reload when ./app/lib/apiConfig.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
