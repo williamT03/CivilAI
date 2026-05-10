@@ -127,3 +127,12 @@
 - Environments: .env.local
 ✓ Ready in 660ms
 
+ GET /subscription 404 in 794ms (next.js: 629ms, application-code: 165ms)
+ GET /subscription 404 in 791ms (next.js: 679ms, application-code: 112ms)
+▲ Next.js 16.2.1 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+- Environments: .env.local
+✓ Ready in 446ms
+
+ GET /subscription 200 in 1749ms (next.js: 1440ms, application-code: 309ms)
