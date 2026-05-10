@@ -1,33 +1,54 @@
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 
 import os
-import json
 import re
-import shutil
 import subprocess
 import sys
 import threading
-from pathlib import Path
+import uuid
+from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from CustomRAG.LLM.rag import ask
+from CustomRAG.db_scripts import ParserPipelineBuilder
+from CustomRAG.tools import StructuredToolFactory
+
+try:
+    from backend.app.ai.usage import get_usage_tracker
+    from backend.app.auth import UserResponse, auth_db, decode_token
+    from backend.app.core.config import get_settings
+    from backend.app.ingestion import get_ingestion_job_store
+    from backend.app.storage import get_file_storage
+    from backend.app.worker import parse_pdf_job
+except ImportError:
+    from app.ai.usage import get_usage_tracker
+    from app.auth import UserResponse, auth_db, decode_token
+    from app.core.config import get_settings
+    from app.ingestion import get_ingestion_job_store
+    from app.storage import get_file_storage
+    from app.worker import parse_pdf_job
 
 app = FastAPI(title="Civil AI — Custom RAG")
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PDF_DIR = os.path.join(PROJECT_ROOT, "Data", "PDF")
-PROCESSED_FILE = os.path.join(PROJECT_ROOT, "Data", "processed_files.json")
+settings = get_settings()
 INDEX_LOCK = threading.Lock()
 ENABLE_LLAMA_SERVER = os.getenv("ENABLE_LLAMA_SERVER", "false").lower() == "true"
+TOOLKIT = StructuredToolFactory.create_toolkit()
+OPTIONAL_OAUTH2_SCHEME = OAuth2PasswordBearer(auto_error=False, tokenUrl="/api/auth/login")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+os.makedirs(PDF_DIR, exist_ok=True)
 app.mount("/pdf", StaticFiles(directory=PDF_DIR), name="pdf")
 
 
@@ -35,20 +56,12 @@ def _safe_pdf_name(filename: str) -> str:
     base = os.path.basename(filename or "").strip()
     if not base:
         raise HTTPException(status_code=400, detail="A PDF filename is required.")
-    safe = re.sub(r"[^A-Za-z0-9._ -]", "_", base)
+    # Keep common ordinance filename punctuation so uploaded documents remain
+    # recognizable in the PDF folder and the jurisdiction list.
+    safe = re.sub(r"[^A-Za-z0-9.,()'&_ -]", "_", base)
     if not safe.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
     return safe
-
-
-def _jurisdiction_name_from_pdf(filename: str) -> str:
-    lower_name = filename.lower()
-    if "broward" in lower_name:
-        return "Broward County, FL"
-    if "cooper" in lower_name:
-        return "Cooper City, FL"
-    return Path(filename).stem.replace("_", " ")
-
 
 def _run_index_command(script_path: str, label: str) -> None:
     result = subprocess.run(
@@ -72,13 +85,75 @@ def _run_optional_llama_index() -> None:
     _run_index_command(os.path.join("LlamaIndexRAG", "build_index.py"), "LlamaIndex indexing")
 
 
+def _run_custom_parse(pdf_path: str, user_id: str | None = None) -> dict:
+    # Build the parser on demand so uploads always use the current storage pipeline.
+    parser = ParserPipelineBuilder().build()
+    return parser.parse_uploaded_pdf(
+        pdf_path,
+        owner_user_id=user_id,
+        visibility="private" if user_id else "public",
+    )
+
+
+def _validate_pdf_signature(path: str) -> None:
+    with open(path, "rb") as handle:
+        signature = handle.read(5)
+    if signature != b"%PDF-":
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid PDF.")
+
+
+def get_optional_current_user(
+    token: Optional[str] = Depends(OPTIONAL_OAUTH2_SCHEME),
+) -> Optional[UserResponse]:
+    """Return the authenticated user when a valid bearer token is present."""
+
+    if not token:
+        return None
+
+    try:
+        payload = decode_token(token)
+        user_id = int(payload.sub.split(":", 1)[0])
+    except Exception:
+        return None
+
+    return auth_db.get_user_by_id(user_id)
+
+
+def _monthly_message_limit_for_user(user: Optional[UserResponse]) -> Optional[int]:
+    if user is None:
+        return None
+    subscription = auth_db.get_subscription(user.id)
+    if subscription.status != "active":
+        raise HTTPException(status_code=402, detail="Subscription is not active.")
+    if subscription.tier.lower() in {"pro", "standard", "standard_user"}:
+        return settings.pro_monthly_message_limit or None
+    return settings.free_monthly_message_limit or None
+
+
+def _enforce_message_limit(user: Optional[UserResponse]) -> None:
+    if user is None:
+        return
+    monthly_limit = _monthly_message_limit_for_user(user)
+    if monthly_limit is None:
+        return
+    now = datetime.utcnow()
+    used_messages = get_usage_tracker().monthly_message_count_for_user(str(user.id), now.year, now.month)
+    if used_messages >= monthly_limit:
+        raise HTTPException(status_code=429, detail="Monthly message limit reached for this subscription.")
+
+
 @app.get("/query")
 def query(
-    q:            str,
+    q: str,
     jurisdiction: Optional[str] = Query(
         default=None,
         description="Filter by jurisdiction: 'cooper city', 'broward county', or omit for all"
     ),
+    current_user: Optional[UserResponse] = Depends(get_optional_current_user),
 ):
     """
     Query the custom RAG system.
@@ -88,64 +163,159 @@ def query(
       /query?q=general+penalty&jurisdiction=cooper+city
       /query?q=capital+improvements+fund   ← searches all jurisdictions
     """
-    result = ask(q, jurisdiction=jurisdiction)
+    _enforce_message_limit(current_user)
+    result = ask(
+        q,
+        jurisdiction=jurisdiction,
+        user_id=str(current_user.id) if current_user else None,
+        request_id=str(uuid.uuid4()),
+    )
     return {
-        "answer":       result["answer"],
-        "accuracy":     result["accuracy"],
-        "system":       "custom",
+        "answer": result["answer"],
+        "accuracy": result["accuracy"],
+        "navigation": result["navigation"],
+        "system": "custom",
         "jurisdiction": result["jurisdiction"],
-        "sources":      result["sources"],
+        "sources": result["sources"],
     }
 
 
 @app.get("/jurisdictions")
-def list_jurisdictions():
-    """Returns jurisdictions inferred from processed_files.json."""
-    if not os.path.exists(PROCESSED_FILE):
-        return {"jurisdictions": []}
+def list_jurisdictions(current_user: Optional[UserResponse] = Depends(get_optional_current_user)):
+    return {"jurisdictions": TOOLKIT.list_jurisdictions(user_id=str(current_user.id) if current_user else None)}
 
-    counts: dict[str, int] = {}
-    with open(PROCESSED_FILE) as f:
-        processed = json.load(f)
 
-    for filename in processed.values():
-        if not isinstance(filename, str) or not filename.lower().endswith(".pdf"):
-            continue
-        jurisdiction = _jurisdiction_name_from_pdf(filename)
-        counts[jurisdiction] = counts.get(jurisdiction, 0) + 1
+@app.get("/navigation-map")
+def navigation_map(current_user: Optional[UserResponse] = Depends(get_optional_current_user)):
+    return TOOLKIT.get_navigation_map(user_id=str(current_user.id) if current_user else None)
 
-    jurisdictions = [
-        {"name": name, "chunks": count}
-        for name, count in sorted(counts.items())
-    ]
-    return {"jurisdictions": jurisdictions}
+
+@app.get("/structure")
+def structure(
+    jurisdiction: Optional[str] = Query(
+        default=None,
+        description="Optional jurisdiction to return one structured document map.",
+    ),
+    current_user: Optional[UserResponse] = Depends(get_optional_current_user),
+):
+    user_id = str(current_user.id) if current_user else None
+    full_map = TOOLKIT.get_navigation_map(user_id=user_id)
+    if not jurisdiction:
+        return full_map
+
+    document_slug = TOOLKIT.resolve_document_slug(jurisdiction, user_id=user_id)
+    if not document_slug:
+        raise HTTPException(status_code=404, detail="Jurisdiction not found in structured map.")
+
+    document = full_map.get("documents", {}).get(document_slug)
+    if not document:
+        raise HTTPException(status_code=404, detail="Structured document map not found.")
+
+    return {
+        "document_slug": document_slug,
+        "document": document,
+    }
 
 
 @app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    current_user: Optional[UserResponse] = Depends(get_optional_current_user),
+):
     filename = _safe_pdf_name(file.filename or "")
     content_type = (file.content_type or "").lower()
     if content_type and content_type not in {"application/pdf", "application/x-pdf"}:
         raise HTTPException(status_code=400, detail="Uploaded file must be a PDF.")
+    if file.size and file.size > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="Uploaded PDF exceeds the configured size limit.")
 
-    os.makedirs(PDF_DIR, exist_ok=True)
-
+    storage = get_file_storage()
     target_path = os.path.join(PDF_DIR, filename)
-    name_root, ext = os.path.splitext(filename)
-    suffix = 1
-    while os.path.exists(target_path):
-        target_path = os.path.join(PDF_DIR, f"{name_root}_{suffix}{ext}")
-        suffix += 1
+    replaced_existing = os.path.exists(target_path)
+    stored_file = storage.save_pdf_stream(
+        file.file,
+        filename=filename,
+        user_id=str(current_user.id) if current_user else None,
+    )
+    if stored_file.size_bytes > settings.max_upload_bytes:
+        try:
+            os.remove(stored_file.local_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=413, detail="Uploaded PDF exceeds the configured size limit.")
+    _validate_pdf_signature(stored_file.local_path)
 
-    with open(target_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    job_store = get_ingestion_job_store()
+    job = job_store.create_job(
+        user_id=str(current_user.id) if current_user else None,
+        filename=os.path.basename(stored_file.local_path),
+        local_path=stored_file.local_path,
+        storage_key=stored_file.storage_key,
+        checksum_sha256=stored_file.checksum_sha256,
+    )
+
+    if settings.async_ingestion_enabled:
+        try:
+            parse_pdf_job.delay(job.id)
+        except Exception as exc:
+            job_store.update_job(job.id, status="failed", stage="queue", progress=100, error=str(exc))
+            raise HTTPException(status_code=503, detail=f"Ingestion queue is unavailable: {exc}")
+        return {
+            "message": "PDF uploaded and queued for indexing.",
+            "filename": os.path.basename(stored_file.local_path),
+            "path": stored_file.local_path,
+            "stored_in": PDF_DIR,
+            "storage_key": stored_file.storage_key,
+            "checksum_sha256": stored_file.checksum_sha256,
+            "replaced_existing": replaced_existing,
+            "job": {
+                "id": job.id,
+                "status": job.status,
+                "stage": job.stage,
+                "progress": job.progress,
+            },
+        }
 
     with INDEX_LOCK:
-        _run_index_command(os.path.join("CustomRAG", "parse.py"), "Custom RAG indexing")
+        job_store.update_job(job.id, status="running", stage="parse", progress=20)
+        parse_result = _run_custom_parse(
+            stored_file.local_path,
+            user_id=str(current_user.id) if current_user else None,
+        )
+        job_store.update_job(job.id, status="running", stage="navigation_refresh", progress=85)
+        TOOLKIT.refresh_navigation_cache()
         _run_optional_llama_index()
+        job_store.update_job(job.id, status="succeeded", stage="complete", progress=100, result=parse_result)
+
+    if current_user:
+        try:
+            auth_db.record_uploaded_document(
+                current_user.id,
+                filename=os.path.basename(stored_file.local_path),
+                document_title=parse_result.get("document_title"),
+                stored_path=stored_file.local_path,
+                chapter_count=parse_result.get("chapter_count"),
+                section_count=parse_result.get("section_count"),
+                subsection_count=parse_result.get("subsection_count"),
+                replaced_existing=replaced_existing,
+            )
+        except Exception:
+            # Upload history should never block the parsing pipeline.
+            pass
 
     return {
         "message": "PDF uploaded and indexed successfully.",
-        "filename": os.path.basename(target_path),
-        "path": target_path,
+        "filename": os.path.basename(stored_file.local_path),
+        "path": stored_file.local_path,
+        "stored_in": PDF_DIR,
+        "storage_key": stored_file.storage_key,
+        "checksum_sha256": stored_file.checksum_sha256,
+        "replaced_existing": replaced_existing,
+        "job": {
+            "id": job.id,
+            "status": "succeeded",
+            "stage": "complete",
+            "progress": 100,
+        },
+        "parse_result": parse_result,
     }
