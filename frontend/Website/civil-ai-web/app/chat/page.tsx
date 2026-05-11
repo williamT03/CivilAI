@@ -195,6 +195,7 @@ function ChatWorkspace() {
   const [isLoadingResponse, setIsLoadingResponse] = useState(false);
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
   const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
+  const [jurisdictionSearch, setJurisdictionSearch] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
@@ -314,8 +315,21 @@ function ChatWorkspace() {
   useEffect(() => {
     if (selectedJurisdiction) {
       localStorage.setItem("civilai_selected_jurisdiction", selectedJurisdiction);
+    } else {
+      localStorage.removeItem("civilai_selected_jurisdiction");
     }
+    setJurisdictionSearch(selectedJurisdiction);
   }, [selectedJurisdiction]);
+
+  function handleJurisdictionSearchChange(value: string) {
+    setJurisdictionSearch(value);
+    setSelectedJurisdiction(value.trim());
+  }
+
+  function clearJurisdictionSearch() {
+    setJurisdictionSearch("");
+    setSelectedJurisdiction("");
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1037,25 +1051,38 @@ function ChatWorkspace() {
                   <h3 className="feature-title">Aim the answer at the right code</h3>
                 </div>
                 <div className="field">
-                  <label className="field-label" htmlFor="jurisdiction">
+                  <label className="field-label" htmlFor="jurisdictionSearch">
                     Search scope
                   </label>
-                  <select
-                    id="jurisdiction"
-                    className="field-select"
-                    value={selectedJurisdiction}
-                    onChange={(event) => setSelectedJurisdiction(event.target.value)}
-                  >
-                    <option value="">All indexed codes</option>
+                  <div className="searchable-select-row">
+                    <input
+                      id="jurisdictionSearch"
+                      className="field-input"
+                      type="search"
+                      list="jurisdictionOptions"
+                      value={jurisdictionSearch}
+                      placeholder="Type a city or county..."
+                      autoComplete="off"
+                      onChange={(event) => handleJurisdictionSearchChange(event.target.value)}
+                    />
+                    {jurisdictionSearch ? (
+                      <button
+                        type="button"
+                        className="button button-subtle compact-action"
+                        onClick={clearJurisdictionSearch}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                  <datalist id="jurisdictionOptions">
                     {jurisdictions.map((option) => (
-                      <option key={option.name} value={option.name}>
-                        {option.name}
-                      </option>
+                      <option key={option.name} value={option.name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <p className="upload-note">
-                  Choose a city or county when the answer needs to stay inside one indexed code.
+                  Type a city or county, or leave this blank to search all indexed codes.
                 </p>
               </div>
 

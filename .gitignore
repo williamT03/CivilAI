@@ -3,6 +3,7 @@ Data/
 storage/
 FAISS/
 chroma_db/
+downloads/
 
 # Python ENV (VERY IMPORTANT)
 .venv/

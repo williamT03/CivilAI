@@ -797,6 +797,18 @@ textarea:disabled {
   gap: 0.45rem;
 }
 
+.searchable-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.compact-action {
+  min-height: 3.1rem;
+  padding-inline: 0.85rem;
+}
+
 .field-input,
 .field-select,
 .field-textarea,
