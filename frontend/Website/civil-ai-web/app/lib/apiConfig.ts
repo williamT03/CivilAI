@@ -22,10 +22,10 @@ const API_BASE = (
 ).replace(/\/+$/, "");
 
 export const CUSTOM_API_BASE =
-  process.env.NEXT_PUBLIC_CUSTOM_API_BASE ?? `${API_BASE}/api/custom`;
+  process.env.NEXT_PUBLIC_CUSTOM_API_BASE || `${API_BASE}/api/custom`;
 
 export const AUTH_API_BASE =
-  process.env.NEXT_PUBLIC_AUTH_API_BASE ?? `${API_BASE}/api/auth`;
+  process.env.NEXT_PUBLIC_AUTH_API_BASE || `${API_BASE}/api/auth`;
 
 export const LLAMA_API_BASE =
-  process.env.NEXT_PUBLIC_LLAMA_API_BASE ?? `${API_BASE}/api/llama`;
+  process.env.NEXT_PUBLIC_LLAMA_API_BASE || `${API_BASE}/api/llama`;
