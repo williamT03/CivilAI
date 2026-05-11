@@ -28,8 +28,8 @@ Create `backend/.env` on the server:
 ```env
 DEEPSEEK_API_KEY=your-deepseek-key
 DEEPSEEK_API_BASE=https://api.deepseek.com
-CUSTOM_RAG_BASE_URL=https://api.yourdomain.com/api/custom
-OLLAMA_URL=http://127.0.0.1:11434/api/generate
+CUSTOM_RAG_BASE_URL=https://civilai-api.willcloudlab.com/api/custom
+OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3
 ENABLE_LLAMA_SERVER=false
 ```

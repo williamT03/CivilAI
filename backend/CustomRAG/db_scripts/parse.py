@@ -170,7 +170,13 @@ class StructuredDocumentBuilder:
                 chapter["toc_code_page"] = toc_code_page.strip()
         return chapter
 
-    def start_section(self, chapter_number: str, section_number: str, heading_text: str = "") -> None:
+    def start_section(
+        self,
+        chapter_number: str,
+        section_number: str,
+        heading_text: str = "",
+        page_number: int | None = None,
+    ) -> None:
         # A new section closes any previous subsection and section state first.
         self._close_subsection()
         self._close_section()
@@ -182,6 +188,7 @@ class StructuredDocumentBuilder:
             "subsection_count": 0,
             "section_summary": "",
             "section_text": "",
+            "page_number": page_number,
             "subsections": [],
             "_body_lines": [],
         }
@@ -189,7 +196,12 @@ class StructuredDocumentBuilder:
         if heading_text:
             self.append_text(heading_text)
 
-    def start_subsection(self, subsection_number: str, heading_text: str = "") -> None:
+    def start_subsection(
+        self,
+        subsection_number: str,
+        heading_text: str = "",
+        page_number: int | None = None,
+    ) -> None:
         # Ignore subsection markers until a parent section exists.
         if self.current_section is None:
             return
@@ -200,6 +212,7 @@ class StructuredDocumentBuilder:
             "subsection_number": normalized_subsection_number,
             "subsection_summary": "",
             "subsection_text": "",
+            "page_number": page_number,
             "_body_lines": [],
         }
 
@@ -804,6 +817,7 @@ class OrdinancePdfParser:
                         chapter_number=chapter_number,
                         section_number=section_number,
                         heading_text=section_match.group(2).strip(),
+                        page_number=page_number,
                     )
                     continue
 
@@ -812,6 +826,7 @@ class OrdinancePdfParser:
                     structure_builder.start_subsection(
                         subsection_number=f"({subsection_match.group(1)})",
                         heading_text=subsection_match.group(2).strip(),
+                        page_number=page_number,
                     )
                     continue
 

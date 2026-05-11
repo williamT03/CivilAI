@@ -280,6 +280,18 @@ class OllamaProvider:
         self.embedding_model = model
         self.timeout_seconds = timeout_seconds
 
+    def _raise_for_status(self, response: requests.Response) -> None:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = response.text.strip()
+            if len(detail) > 500:
+                detail = f"{detail[:500]}..."
+            raise RuntimeError(
+                f"Ollama request failed with HTTP {response.status_code} for model "
+                f"'{self.model}' at {self.base_url}: {detail or response.reason}"
+            ) from exc
+
     def generate(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> AIResponse:
         start = time.perf_counter()
         response = requests.post(
@@ -292,7 +304,7 @@ class OllamaProvider:
             },
             timeout=self.timeout_seconds,
         )
-        response.raise_for_status()
+        self._raise_for_status(response)
         response_json = response.json()
         text = (response_json.get("response") or "").strip()
         latency_ms = (time.perf_counter() - start) * 1000
@@ -334,7 +346,7 @@ class OllamaProvider:
             timeout=self.timeout_seconds,
             stream=True,
         ) as response:
-            response.raise_for_status()
+            self._raise_for_status(response)
             for raw_line in response.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue

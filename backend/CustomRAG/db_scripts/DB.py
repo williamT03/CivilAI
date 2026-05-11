@@ -44,6 +44,8 @@ class SubsectionDefinition:
     subsection_summary: str = ""
     # The exact parsed text that belongs to this subsection.
     subsection_text: str = ""
+    # One-based PDF page where this subsection begins, when known.
+    page_number: int | None = None
 
 
 @dataclass(slots=True)
@@ -56,6 +58,8 @@ class SectionDefinition:
     section_summary: str = ""
     # The exact parsed text for the section body outside subsection granularity.
     section_text: str = ""
+    # One-based PDF page where this section begins, when known.
+    page_number: int | None = None
     # The subsection rows that belong to this section.
     subsections: list[SubsectionDefinition] = field(default_factory=list)
 
@@ -183,6 +187,7 @@ class DocumentSchemaBuilder:
                         subsection_number=str(raw_subsection["subsection_number"]),
                         subsection_summary=raw_subsection.get("subsection_summary", ""),
                         subsection_text=raw_subsection.get("subsection_text", ""),
+                        page_number=raw_subsection.get("page_number"),
                     )
                     for raw_subsection in raw_section.get("subsections", [])
                 ]
@@ -193,6 +198,7 @@ class DocumentSchemaBuilder:
                         subsection_count=int(raw_section.get("subsection_count", len(subsections))),
                         section_summary=raw_section.get("section_summary", ""),
                         section_text=raw_section.get("section_text", ""),
+                        page_number=raw_section.get("page_number"),
                         subsections=subsections,
                     )
                 )
@@ -225,11 +231,13 @@ class DocumentSchemaBuilder:
                         subsection_count=section.subsection_count or len(section.subsections),
                         section_summary=section.section_summary,
                         section_text=section.section_text,
+                        page_number=section.page_number,
                         subsections=[
                             SubsectionDefinition(
                                 subsection_number=subsection.subsection_number,
                                 subsection_summary=subsection.subsection_summary,
                                 subsection_text=subsection.subsection_text,
+                                page_number=subsection.page_number,
                             )
                             for subsection in section.subsections
                         ],
@@ -304,6 +312,7 @@ class RelationalSchemaFactory:
             Column("subsection_count", Integer, nullable=False, default=0),
             Column("section_summary", Text, nullable=True),
             Column("section_text", Text, nullable=True),
+            Column("page_number", Integer, nullable=True),
             UniqueConstraint("chapter_id", "section_number", name="uq_sections_chapter_number"),
         )
 
@@ -316,6 +325,7 @@ class RelationalSchemaFactory:
             Column("subsection_number", String(150), nullable=False),
             Column("subsection_summary", Text, nullable=True),
             Column("subsection_text", Text, nullable=True),
+            Column("page_number", Integer, nullable=True),
             UniqueConstraint("section_id", "subsection_number", name="uq_subsections_section_number"),
         )
 
@@ -482,6 +492,7 @@ class DatabaseManager:
                             subsection_count=section.subsection_count,
                             section_summary=section.section_summary,
                             section_text=section.section_text,
+                            page_number=section.page_number,
                         )
                     ).inserted_primary_key[0]
 
@@ -492,6 +503,7 @@ class DatabaseManager:
                                 subsection_number=subsection.subsection_number,
                                 subsection_summary=subsection.subsection_summary,
                                 subsection_text=subsection.subsection_text,
+                                page_number=subsection.page_number,
                             )
                         )
 
@@ -610,6 +622,26 @@ class DatabaseManager:
                 .values(visibility="public")
             )
 
+        self._ensure_page_number_columns(inspector)
+
+    def _ensure_page_number_columns(self, inspector) -> None:
+        """Add citation page columns to older structured databases."""
+
+        with self.engine.begin() as connection:
+            try:
+                section_columns = {column["name"] for column in inspector.get_columns("sections")}
+            except sqlalchemy.exc.NoSuchTableError:
+                section_columns = set()
+            if section_columns and "page_number" not in section_columns:
+                connection.execute(text("ALTER TABLE sections ADD COLUMN page_number INTEGER"))
+
+            try:
+                subsection_columns = {column["name"] for column in inspector.get_columns("subsections")}
+            except sqlalchemy.exc.NoSuchTableError:
+                subsection_columns = set()
+            if subsection_columns and "page_number" not in subsection_columns:
+                connection.execute(text("ALTER TABLE subsections ADD COLUMN page_number INTEGER"))
+
     def reset_structured_storage(self) -> None:
         """Wipe the structured hierarchy so a full reparse starts from a clean slate."""
 
@@ -690,11 +722,13 @@ class DatabaseManager:
                             "subsection_count": section_row["subsection_count"],
                             "section_summary": section_row["section_summary"],
                             "section_text": section_row["section_text"],
+                            "page_number": section_row.get("page_number"),
                             "subsections": [
                                 {
                                     "subsection_number": subsection_row["subsection_number"],
                                     "subsection_summary": subsection_row["subsection_summary"],
                                     "subsection_text": subsection_row["subsection_text"],
+                                    "page_number": subsection_row.get("page_number"),
                                 }
                                 for subsection_row in subsection_rows
                             ],
@@ -810,6 +844,7 @@ class DatabaseManager:
                     sections.c.subsection_count,
                     sections.c.section_summary,
                     sections.c.section_text,
+                    sections.c.page_number,
                 )
                 .select_from(
                     sections.join(chapters, sections.c.chapter_id == chapters.c.id).join(
@@ -837,6 +872,7 @@ class DatabaseManager:
                         subsections.c.subsection_number,
                         subsections.c.subsection_summary,
                         subsections.c.subsection_text,
+                        subsections.c.page_number,
                     )
                     .where(subsections.c.section_id == section_row["section_id"])
                     .order_by(subsections.c.id)
@@ -857,6 +893,7 @@ class DatabaseManager:
                         "subsection_count": section_row["subsection_count"],
                         "section_summary": section_row["section_summary"],
                         "section_text": section_row["section_text"],
+                        "page_number": section_row.get("page_number"),
                         "subsections": [dict(subsection_row) for subsection_row in subsection_rows],
                     }
                 )
@@ -901,9 +938,11 @@ class DatabaseManager:
                     sections.c.section_number,
                     sections.c.section_summary,
                     sections.c.section_text,
+                    sections.c.page_number.label("section_page_number"),
                     subsections.c.subsection_number,
                     subsections.c.subsection_summary,
                     subsections.c.subsection_text,
+                    subsections.c.page_number,
                 )
                 .select_from(
                     subsections.join(sections, subsections.c.section_id == sections.c.id)

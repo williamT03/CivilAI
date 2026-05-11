@@ -795,7 +795,7 @@ class StructuredRetrievalToolkit:
                 "title": section_row["chapter_name"],
                 "chapter_number": section_row["chapter_number"],
                 "chapter_name": section_row["chapter_name"],
-                "page": section_row.get("toc_page"),
+                "page": section_row.get("page_number") or section_row.get("toc_page"),
                 "node_type": "section",
                 "owner_user_id": section_row.get("owner_user_id"),
                 "visibility": section_row.get("visibility") or "public",
@@ -823,7 +823,9 @@ class StructuredRetrievalToolkit:
                 "title": subsection_row["chapter_name"],
                 "chapter_number": subsection_row["chapter_number"],
                 "chapter_name": subsection_row["chapter_name"],
-                "page": subsection_row.get("toc_page"),
+                "page": subsection_row.get("page_number")
+                or subsection_row.get("section_page_number")
+                or subsection_row.get("toc_page"),
                 "node_type": "subsection",
                 "owner_user_id": subsection_row.get("owner_user_id"),
                 "visibility": subsection_row.get("visibility") or "public",
