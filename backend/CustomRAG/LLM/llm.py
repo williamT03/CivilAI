@@ -63,8 +63,7 @@ def build_context(results: list[dict], max_chars: int = MAX_CONTEXT_CHARS) -> st
         header = (
             f"[Source {index}] {meta.get('jurisdiction', 'Unknown jurisdiction')} | "
             f"Chapter {meta.get('chapter_number', '?')}: {meta.get('chapter_name', 'Unknown chapter')} | "
-            f"{citation} | matched_by={result.get('matched_by', 'semantic')} | "
-            f"score={float(result.get('score', 0.0)):.4f}"
+            f"{citation}"
         )
 
         summary = (result.get("summary") or "").strip()
@@ -123,10 +122,16 @@ def build_prompt(
         Answer the question using ONLY the provided ordinance evidence below.
 
         Rules:
+        - Start with the direct answer in plain engineering language.
+        - For zoning/development-standard questions, organize the response with these labels when applicable:
+          District, Applicable standard, Setbacks, Citations, Notes/limitations.
         - Cite the exact section and subsection for every claim, for example `Sec. 2-4 (a)`.
         - Treat the tool trace as navigation history, not as legal authority.
         - Prefer exact matches over semantic matches when both are present.
+        - Do not expose internal retrieval labels, match scores, tool names, or raw source block formatting.
+        - Do not paste long ordinance excerpts unless the user asks for the exact text.
         - If the user asks for a summary, synthesize across the cited sections but still cite them.
+        - If the retrieved evidence is about a special use, such as wireless facilities or antennas, do not apply it as a base zoning district rule unless the question asks about that special use.
         - If the answer is not supported by the evidence, respond exactly:
           "Not found in provided code sections."
         - Do NOT fabricate thresholds, fees, deadlines, penalties, or vote counts.

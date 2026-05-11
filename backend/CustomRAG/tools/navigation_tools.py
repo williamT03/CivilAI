@@ -291,6 +291,97 @@ class StructuredToolFactory:
 class StructuredRetrievalToolkit:
     """Tool-driven navigation and retrieval over the normalized DB/Chroma stack."""
 
+    ZONING_DISTRICT_CODES = {
+        "A-1",
+        "A-2",
+        "A-3",
+        "AIR-1",
+        "CG",
+        "CH",
+        "CL",
+        "CN",
+        "CON-1",
+        "CON-2",
+        "CON-3",
+        "IG",
+        "MED",
+        "OCR",
+        "PD",
+        "PRO",
+        "R-BCID",
+        "RFD",
+        "RM-3",
+        "RM-4",
+        "RM-6",
+        "RM-8",
+        "RM-10",
+        "RMH-6",
+        "RMH-8",
+        "RS-1",
+        "RS-2",
+        "RS-3",
+        "RS-6",
+        "RT-6",
+    }
+    ZONING_DISTRICT_PATTERN = re.compile(
+        r"\b(?:A-\d|AIR-1|CG|CH|CL|CN|CON-[123]|IG|MED|OCR|PD|PRO|R-BCID|RFD|"
+        r"RM-\d+|RMH-\d+|RS-\d+|RT-\d+)\b",
+        re.IGNORECASE,
+    )
+    DISTRICT_ALIASES = {
+        "CG": ("commercial general", "general commercial", "commercial district", "cg district", "cg zoning"),
+        "CN": ("neighborhood commercial", "commercial neighborhood", "cn district", "cn zoning"),
+        "CH": ("heavy commercial", "highway commercial", "ch district", "ch zoning"),
+        "CL": ("limited commercial", "light commercial", "cl district", "cl zoning"),
+        "OCR": ("office commercial residential", "office commercial", "ocr district", "ocr zoning"),
+        "MED": ("medical district", "medical zoning", "med district"),
+        "PRO": ("professional office", "professional office district", "pro district"),
+        "IG": ("general industrial", "industrial general", "industrial district", "ig district"),
+    }
+    STANDARD_ALIASES = {
+        "setback": (
+            "setback",
+            "setbacks",
+            "yard",
+            "yards",
+            "minimum yard",
+            "minimum yards",
+            "building setback",
+            "required yard",
+            "front yard",
+            "side yard",
+            "rear yard",
+        ),
+        "height": ("height", "building height", "maximum height", "height limitation"),
+        "parking": ("parking", "off street parking", "parking spaces", "parking requirement"),
+        "lot": ("lot size", "lot width", "lot coverage", "minimum lot", "site area"),
+    }
+    BASE_ZONING_TERMS = {
+        "district",
+        "districts",
+        "zone",
+        "zoning",
+        "commercial",
+        "residential",
+        "industrial",
+        "setback",
+        "setbacks",
+        "yard",
+        "yards",
+        "height",
+        "parking",
+    }
+    SPECIAL_USE_TERMS = {
+        "antenna",
+        "antennas",
+        "communication facility",
+        "communications facility",
+        "tower",
+        "towers",
+        "wireless",
+        "wcf",
+    }
+
     SECTION_REFERENCE_PATTERN = re.compile(r"\b\d+[A-Za-z]?(?:[.-]\d+[A-Za-z0-9]*)+\b")
     SUBSECTION_REFERENCE_PATTERN = re.compile(
         r"(?:sec(?:tion)?\.?\s*)?([A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)+)\s*\(([A-Za-z0-9]+)\)",
@@ -537,8 +628,18 @@ class StructuredRetrievalToolkit:
                 }
             )
 
+        expanded_query = self.expand_domain_query(query)
+        if expanded_query != query:
+            tool_trace.append(
+                {
+                    "tool": "expand_domain_query",
+                    "input": query,
+                    "output": expanded_query,
+                }
+            )
+
         semantic_results = self.semantic_search(
-            query=query,
+            query=expanded_query,
             document_slug=resolved_document_slug,
             limit=max(top_k, 8),
             user_id=user_id,
@@ -552,7 +653,7 @@ class StructuredRetrievalToolkit:
             )
 
         keyword_results = self.keyword_search(
-            query=query,
+            query=expanded_query,
             document_slug=resolved_document_slug,
             navigation_map=navigation_map,
             limit=max(top_k, 8),
@@ -568,6 +669,7 @@ class StructuredRetrievalToolkit:
 
         merged_results = self._merge_results(
             query=query,
+            expanded_query=expanded_query,
             exact_results=exact_results,
             keyword_results=keyword_results,
             semantic_results=semantic_results,
@@ -882,12 +984,16 @@ class StructuredRetrievalToolkit:
     def _merge_results(
         self,
         query: str,
+        expanded_query: str,
         exact_results: Sequence[dict],
         keyword_results: Sequence[dict],
         semantic_results: Sequence[dict],
         top_k: int,
     ) -> list[dict]:
-        query_terms = self._extract_query_terms(query)
+        query_terms = self._extract_query_terms(expanded_query)
+        district_codes = self.detect_zoning_districts(query)
+        standard_terms = self.detect_requested_standards(query)
+        asks_base_zoning = self.detect_base_zoning_intent(query, district_codes, standard_terms)
         aggregated: dict[tuple[str, str, str], dict] = {}
 
         for result in [*exact_results, *keyword_results, *semantic_results]:
@@ -930,7 +1036,13 @@ class StructuredRetrievalToolkit:
 
         reranked_results: list[dict] = []
         for result in aggregated.values():
-            rerank_score = self._compute_result_rank(result, query_terms)
+            rerank_score = self._compute_result_rank(
+                result,
+                query_terms,
+                district_codes=district_codes,
+                standard_terms=standard_terms,
+                asks_base_zoning=asks_base_zoning,
+            )
             result["score"] = rerank_score
             result["rerank_score"] = rerank_score
             result["matched_by"] = self._select_primary_match_method(result.get("matched_methods", []))
@@ -944,6 +1056,17 @@ class StructuredRetrievalToolkit:
             ),
             reverse=True,
         )
+        if asks_base_zoning:
+            reranked_results = [
+                result
+                for result in reranked_results
+                if self._result_supports_base_zoning(
+                    result,
+                    district_codes=district_codes,
+                    standard_terms=standard_terms,
+                    query=query,
+                )
+            ]
         return reranked_results[:top_k]
 
     def _dedupe_results(self, results: Sequence[dict]) -> list[dict]:
@@ -963,7 +1086,15 @@ class StructuredRetrievalToolkit:
 
         return list(deduped.values())
 
-    def _compute_result_rank(self, result: dict, query_terms: Sequence[str]) -> float:
+    def _compute_result_rank(
+        self,
+        result: dict,
+        query_terms: Sequence[str],
+        *,
+        district_codes: Sequence[str] | None = None,
+        standard_terms: Sequence[str] | None = None,
+        asks_base_zoning: bool = False,
+    ) -> float:
         """Blend channel agreement and topic overlap into one sortable rank."""
 
         matched_methods = [str(method) for method in result.get("matched_methods", []) if method]
@@ -1003,7 +1134,25 @@ class StructuredRetrievalToolkit:
         elif keyword_present:
             rerank_score += 0.02
 
-        return min(rerank_score, 1.0)
+        district_codes = [code.upper() for code in (district_codes or [])]
+        standard_terms = [term.lower() for term in (standard_terms or [])]
+
+        if district_codes:
+            district_hits = sum(1 for code in district_codes if self._district_code_in_text(code, text))
+            if district_hits:
+                rerank_score += min(district_hits * 0.16, 0.24)
+            else:
+                rerank_score -= 0.16
+
+        if standard_terms:
+            standard_hits = sum(1 for term in standard_terms if term in text)
+            if standard_hits:
+                rerank_score += min(standard_hits * 0.08, 0.2)
+
+        if asks_base_zoning and self._contains_special_use_terms(text) and not self._query_mentions_special_use(" ".join(query_terms)):
+            rerank_score -= 0.22
+
+        return max(0.0, min(rerank_score, 1.0))
 
     @staticmethod
     def _select_primary_match_method(matched_methods: Sequence[str]) -> str:
@@ -1066,11 +1215,137 @@ class StructuredRetrievalToolkit:
             "says",
             "say",
         }
+        raw_terms = re.findall(r"[a-z0-9-]+", (query or "").lower())
+        district_lookup = {code.lower() for code in StructuredRetrievalToolkit.ZONING_DISTRICT_CODES}
         return [
             term
-            for term in re.findall(r"[a-z0-9]+", (query or "").lower())
-            if len(term) > 2 and term not in stop_words
+            for term in raw_terms
+            if (len(term) > 2 or term in district_lookup)
+            and term not in stop_words
         ]
+
+    @classmethod
+    def expand_domain_query(cls, query: str) -> str:
+        """Expand civil/zoning shorthand so retrieval sees ordinance language."""
+
+        normalized = (query or "").strip()
+        if not normalized:
+            return normalized
+
+        expansions: list[str] = []
+        district_codes = cls.detect_zoning_districts(normalized)
+        for code in district_codes:
+            expansions.append(code)
+            expansions.extend(cls.DISTRICT_ALIASES.get(code, ()))
+
+        lowered = normalized.lower()
+        for intent, aliases in cls.STANDARD_ALIASES.items():
+            if any(alias in lowered for alias in aliases):
+                expansions.extend(aliases)
+
+        if "commercial" in lowered and not district_codes:
+            expansions.extend(("commercial district", "commercial zoning", "CG", "CN", "CH", "CL"))
+
+        unique_expansions: list[str] = []
+        seen: set[str] = set()
+        for expansion in expansions:
+            key = expansion.lower()
+            if key and key not in seen and key not in lowered:
+                unique_expansions.append(expansion)
+                seen.add(key)
+
+        if not unique_expansions:
+            return normalized
+        return f"{normalized} {' '.join(unique_expansions)}"
+
+    @classmethod
+    def detect_zoning_districts(cls, query: str) -> list[str]:
+        matches = []
+        seen: set[str] = set()
+        for match in cls.ZONING_DISTRICT_PATTERN.findall(query or ""):
+            code = match.upper()
+            if code not in seen:
+                matches.append(code)
+                seen.add(code)
+        lowered = (query or "").lower()
+        for code, aliases in cls.DISTRICT_ALIASES.items():
+            if code in seen:
+                continue
+            if any(alias in lowered for alias in aliases):
+                matches.append(code)
+                seen.add(code)
+        return matches
+
+    @classmethod
+    def detect_requested_standards(cls, query: str) -> list[str]:
+        lowered = (query or "").lower()
+        terms: list[str] = []
+        seen: set[str] = set()
+        for aliases in cls.STANDARD_ALIASES.values():
+            if any(alias in lowered for alias in aliases):
+                for alias in aliases:
+                    if alias not in seen:
+                        terms.append(alias)
+                        seen.add(alias)
+        return terms
+
+    @classmethod
+    def detect_base_zoning_intent(cls, query: str, district_codes: Sequence[str], standard_terms: Sequence[str]) -> bool:
+        lowered = (query or "").lower()
+        has_base_term = any(term in lowered for term in cls.BASE_ZONING_TERMS)
+        return bool((district_codes or "commercial" in lowered) and (standard_terms or has_base_term))
+
+    @classmethod
+    def _contains_special_use_terms(cls, text: str) -> bool:
+        lowered = (text or "").lower()
+        return any(term in lowered for term in cls.SPECIAL_USE_TERMS)
+
+    @classmethod
+    def _query_mentions_special_use(cls, query: str) -> bool:
+        return cls._contains_special_use_terms(query)
+
+    @staticmethod
+    def _district_code_in_text(code: str, text: str) -> bool:
+        escaped = re.escape(code.lower())
+        return bool(re.search(rf"(?<![a-z0-9-]){escaped}(?![a-z0-9-])", text or "", re.IGNORECASE))
+
+    @classmethod
+    def _result_supports_base_zoning(
+        cls,
+        result: dict,
+        *,
+        district_codes: Sequence[str],
+        standard_terms: Sequence[str],
+        query: str,
+    ) -> bool:
+        text = " ".join(
+            [
+                str(result.get("summary") or ""),
+                str(result.get("text") or ""),
+                str(result.get("meta", {}).get("chapter_name") or ""),
+                str(result.get("meta", {}).get("title") or ""),
+            ]
+        ).lower()
+
+        if cls._contains_special_use_terms(text) and not cls._query_mentions_special_use(query):
+            return False
+
+        if standard_terms and not any(term.lower() in text for term in standard_terms):
+            return False
+
+        if district_codes:
+            for code in district_codes:
+                if cls._district_code_in_text(code, text):
+                    return True
+                if any(alias in text for alias in cls.DISTRICT_ALIASES.get(code.upper(), ())):
+                    return True
+            return False
+
+        lowered_query = (query or "").lower()
+        if "commercial" in lowered_query:
+            return "commercial" in text or "district" in text or "zoning" in text
+
+        return True
 
     def _build_navigation_payload(
         self,

@@ -1130,11 +1130,45 @@ class DatabaseManager:
         }
 
         excluded_lookup = {term.lower() for term in (excluded_terms or set()) if term}
+        zoning_codes = {
+            "a-1",
+            "a-2",
+            "a-3",
+            "air-1",
+            "cg",
+            "ch",
+            "cl",
+            "cn",
+            "con-1",
+            "con-2",
+            "con-3",
+            "ig",
+            "med",
+            "ocr",
+            "pd",
+            "pro",
+            "r-bcid",
+            "rfd",
+            "rm-3",
+            "rm-4",
+            "rm-6",
+            "rm-8",
+            "rm-10",
+            "rmh-6",
+            "rmh-8",
+            "rs-1",
+            "rs-2",
+            "rs-3",
+            "rs-6",
+            "rt-6",
+        }
 
         return [
             term
-            for term in re.findall(r"[a-z0-9]+", (query or "").lower())
-            if len(term) > 2 and term not in stop_words and term not in excluded_lookup
+            for term in re.findall(r"[a-z0-9-]+", (query or "").lower())
+            if (len(term) > 2 or term in zoning_codes)
+            and term not in stop_words
+            and term not in excluded_lookup
         ]
 
     @staticmethod

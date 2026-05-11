@@ -66,6 +66,68 @@ class TestStructuredStack(unittest.TestCase):
         self.assertEqual(semantic_payload["results"][0]["meta"]["section"], "Sec. 1-2")
         self.assertTrue(semantic_payload["tool_trace"])
 
+    def test_zoning_shorthand_prefers_base_district_setbacks_over_wireless(self) -> None:
+        self.fixture.cleanup()
+        self.fixture = StructuredStackFixture()
+        self.fixture.seed_document(
+            document_title="Indian River County, FL Code of Ordinances",
+            source_filename="Indian River County, FL Code of Ordinances.pdf",
+            chapters=[
+                {
+                    "chapter_number": "911",
+                    "chapter_name": "Zoning Districts",
+                    "toc_page": 40,
+                    "sections": [
+                        {
+                            "section_number": "Sec. 911.09",
+                            "section_summary": "Commercial district development standards.",
+                            "section_text": (
+                                "Commercial General CG district development standards. "
+                                "Minimum yard setbacks for the CG district are front yard 25 feet, "
+                                "side yard 10 feet, and rear yard 20 feet."
+                            ),
+                            "page_number": 118,
+                            "subsections": [],
+                        }
+                    ],
+                },
+                {
+                    "chapter_number": "971",
+                    "chapter_name": "Specific Land Uses",
+                    "toc_page": 65,
+                    "sections": [
+                        {
+                            "section_number": "Sec. 971.44",
+                            "section_summary": "Wireless facility master plan.",
+                            "section_text": (
+                                "Wireless communication facility standards for CG and other districts. "
+                                "Antenna-supporting structures and wireless equipment must meet special "
+                                "setbacks from property lines and occupied residences."
+                            ),
+                            "page_number": 72,
+                            "subsections": [],
+                        }
+                    ],
+                },
+            ],
+        )
+        self.toolkit = self.fixture.toolkit
+
+        for query in (
+            "What are the setbacks for CG?",
+            "What are the setbacks for Commercial General?",
+            "CG building setbacks",
+            "commercial zone setbacks",
+        ):
+            with self.subTest(query=query):
+                payload = self.toolkit.run_tool_chain(query, jurisdiction="Indian River County")
+
+                self.assertTrue(payload["results"])
+                top_result = payload["results"][0]
+                self.assertEqual(top_result["meta"]["section"], "Sec. 911.09")
+                self.assertEqual(top_result["meta"]["page"], 118)
+                self.assertNotIn("Wireless communication facility", top_result["text"])
+
 
 if __name__ == "__main__":
     unittest.main()
