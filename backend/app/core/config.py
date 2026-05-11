@@ -45,7 +45,19 @@ class CivilAISettings:
     cors_allow_origins: list[str] = field(
         default_factory=lambda: _csv_env(
             "CORS_ALLOW_ORIGINS",
-            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+            (
+                "http://localhost:3000,"
+                "http://127.0.0.1:3000,"
+                "http://localhost:3001,"
+                "http://127.0.0.1:3001,"
+                "https://civilai.willcloudlab.com"
+            ),
+        )
+    )
+    cors_allow_origin_regex: str | None = field(
+        default_factory=lambda: os.getenv(
+            "CORS_ALLOW_ORIGIN_REGEX",
+            r"https://([a-z0-9-]+\.)?willcloudlab\.com",
         )
     )
     cors_allow_credentials: bool = field(default_factory=lambda: _bool_env("CORS_ALLOW_CREDENTIALS", True))
