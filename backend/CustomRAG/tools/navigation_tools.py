@@ -346,7 +346,7 @@ class StructuredRetrievalToolkit:
     def list_jurisdictions(self, user_id: str | None = None) -> list[dict]:
         """Return the code-focus options that should appear in the website filter."""
 
-        navigation_map = self.get_navigation_map(user_id=user_id)
+        navigation_map = self.get_navigation_map(refresh=True, user_id=user_id)
         jurisdictions = []
         for document in navigation_map.get("documents", {}).values():
             # `chunks` stays as the legacy field name expected by the frontend,
@@ -363,7 +363,7 @@ class StructuredRetrievalToolkit:
     def resolve_document_slug(self, user_text: str | None, user_id: str | None = None) -> str | None:
         """Resolve a user-provided jurisdiction string or query text to one document slug."""
 
-        navigation_map = self.get_navigation_map(user_id=user_id)
+        navigation_map = self.get_navigation_map(refresh=True, user_id=user_id)
         documents = navigation_map.get("documents", {})
         if not documents:
             return None
@@ -486,7 +486,7 @@ class StructuredRetrievalToolkit:
     ) -> dict:
         """Execute the retrieval tools in a deterministic order before prompting the LLM."""
 
-        navigation_map = self.get_navigation_map(user_id=user_id)
+        navigation_map = self.get_navigation_map(refresh=True, user_id=user_id)
 
         # Resolve the code focus from either the explicit filter or the query itself.
         resolved_document_slug = self.resolve_document_slug(jurisdiction, user_id=user_id) or self.resolve_document_slug(query, user_id=user_id)

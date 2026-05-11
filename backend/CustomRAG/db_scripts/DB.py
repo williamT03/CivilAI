@@ -964,7 +964,7 @@ class DatabaseManager:
             if not search_terms:
                 return []
 
-        section_rows = self.find_sections(document_title_or_slug=document_title_or_slug)
+        section_rows = self.find_sections(document_title_or_slug=document_title_or_slug, user_id=user_id)
         scored_rows: list[dict] = []
 
         for section_row in section_rows:
