@@ -8,6 +8,12 @@ function resolveDefaultApiBase() {
     return "http://localhost:8000";
   }
 
+  const domainParts = hostname.split(".");
+  if (domainParts.length > 2) {
+    const [subdomain, ...rootDomain] = domainParts;
+    return `${protocol}//${subdomain}-api.${rootDomain.join(".")}`;
+  }
+
   return `${protocol}//api.${hostname}`;
 }
 
