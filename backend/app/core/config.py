@@ -96,6 +96,8 @@ class CivilAISettings:
     async_ingestion_enabled: bool = field(default_factory=lambda: _bool_env("ASYNC_INGESTION_ENABLED", False))
     qdrant_url: str = field(default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333"))
     qdrant_api_key: str | None = field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
+    qdrant_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("QDRANT_TIMEOUT_SECONDS", "300")))
+    qdrant_upsert_batch_size: int = field(default_factory=lambda: int(os.getenv("QDRANT_UPSERT_BATCH_SIZE", "64")))
     vector_store_backend: str = field(default_factory=lambda: os.getenv("VECTOR_STORE_BACKEND", "chroma"))
     chroma_persist_directory: str = field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIRECTORY", "backend/Data/chroma_db"))
 

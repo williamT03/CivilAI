@@ -628,7 +628,12 @@ class QdrantStructuredManager:
         settings = get_settings()
         self.db_manager = db_manager
         self.builder = builder or ChromaDocumentBuilder()
-        self.client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        self.upsert_batch_size = max(1, int(settings.qdrant_upsert_batch_size))
+        self.client = QdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key or None,
+            timeout=float(settings.qdrant_timeout_seconds),
+        )
         self.collection_names = {
             ChromaCollectionFactory.DOCUMENT_COLLECTION,
             ChromaCollectionFactory.CHAPTER_COLLECTION,
@@ -800,19 +805,21 @@ class QdrantStructuredManager:
         from qdrant_client.models import PointStruct
 
         self._ensure_collection(collection_name, vector_size=len(nodes[0].embedding))
-        points = [
-            PointStruct(
-                id=str(uuid.uuid5(uuid.NAMESPACE_URL, node.node_id)),
-                vector=node.embedding,
-                payload={
-                    "node_id": node.node_id,
-                    "document": node.document,
-                    **self._normalize_metadata(node.metadata),
-                },
-            )
-            for node in nodes
-        ]
-        self.client.upsert(collection_name=collection_name, points=points)
+        for start in range(0, len(nodes), self.upsert_batch_size):
+            batch = nodes[start : start + self.upsert_batch_size]
+            points = [
+                PointStruct(
+                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, node.node_id)),
+                    vector=node.embedding,
+                    payload={
+                        "node_id": node.node_id,
+                        "document": node.document,
+                        **self._normalize_metadata(node.metadata),
+                    },
+                )
+                for node in batch
+            ]
+            self.client.upsert(collection_name=collection_name, points=points)
 
     def _ensure_collection(self, collection_name: str, vector_size: int) -> None:
         if self._collection_exists(collection_name):
