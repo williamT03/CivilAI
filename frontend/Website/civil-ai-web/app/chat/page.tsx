@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProtectedRoute } from "../components/ProtectedRoute";
 import { SiteHeader } from "../components/SiteHeader";
 import { useAuth } from "../context/AuthContext";
@@ -15,13 +15,27 @@ interface JurisdictionOption {
 
 interface UploadResult {
   filename?: string;
-  storedIn?: string;
   documentTitle?: string;
   chapterCount?: number;
   sectionCount?: number;
   subsectionCount?: number;
   replacedExisting?: boolean;
   focusSwitchedTo?: string;
+}
+
+interface UploadJobResponse {
+  id: string;
+  filename?: string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  stage?: string;
+  progress?: number;
+  error?: string | null;
+  result?: {
+    document_title?: string;
+    chapter_count?: number;
+    section_count?: number;
+    subsection_count?: number;
+  } | null;
 }
 
 interface Message {
@@ -213,20 +227,64 @@ function ChatWorkspace() {
     [user?.id],
   );
 
+  const buildApiHeaders = useCallback((): HeadersInit => {
+    if (token && !isGuest) {
+      return { Authorization: `Bearer ${token}` };
+    }
+    return {};
+  }, [isGuest, token]);
+
+  const loadJurisdictions = useCallback(async () => {
+    const response = await fetch(`${CUSTOM_API_BASE}/jurisdictions`, {
+      headers: buildApiHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error("Could not load jurisdictions");
+    }
+    const payload = (await response.json()) as {
+      jurisdictions?: JurisdictionOption[];
+    };
+    const nextJurisdictions = payload.jurisdictions ?? [];
+    setJurisdictions(nextJurisdictions);
+    return nextJurisdictions;
+  }, [buildApiHeaders]);
+
+  const waitForUploadJob = useCallback(
+    async (jobId: string) => {
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        const response = await fetch(`${CUSTOM_API_BASE}/ingestion-jobs/${jobId}`, {
+          headers: buildApiHeaders(),
+        });
+        if (!response.ok) {
+          throw new Error("Could not check indexing progress.");
+        }
+        const job = (await response.json()) as UploadJobResponse;
+
+        if (job.status === "succeeded") {
+          return job;
+        }
+        if (job.status === "failed") {
+          throw new Error(job.error || "Indexing failed.");
+        }
+
+        setUploadStatus(
+          `Indexing ${job.filename || "PDF"}... ${job.progress ?? 0}% complete`,
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
+
+      throw new Error("Indexing is still running. Refresh the filter in a moment.");
+    },
+    [buildApiHeaders],
+  );
+
   useEffect(() => {
     let isMounted = true;
 
-    async function loadJurisdictions() {
+    async function hydrateJurisdictions() {
       try {
-        const response = await fetch(`${CUSTOM_API_BASE}/jurisdictions`);
-        if (!response.ok) {
-          throw new Error("Could not load jurisdictions");
-        }
-        const payload = (await response.json()) as {
-          jurisdictions?: JurisdictionOption[];
-        };
         if (isMounted) {
-          setJurisdictions(payload.jurisdictions ?? []);
+          await loadJurisdictions();
         }
       } catch {
         if (isMounted) {
@@ -235,12 +293,12 @@ function ChatWorkspace() {
       }
     }
 
-    void loadJurisdictions();
+    void hydrateJurisdictions();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadJurisdictions]);
 
   useEffect(() => {
     const storedFocus = localStorage.getItem("civilai_selected_jurisdiction");
@@ -782,8 +840,13 @@ function ChatWorkspace() {
       const payload = (await response.json()) as {
         detail?: string;
         filename?: string;
-        stored_in?: string;
         replaced_existing?: boolean;
+        job?: {
+          id?: string;
+          status?: string;
+          stage?: string;
+          progress?: number;
+        };
         parse_result?: {
           document_title?: string;
           chapter_count?: number;
@@ -796,19 +859,25 @@ function ChatWorkspace() {
         throw new Error(payload.detail || "Upload failed.");
       }
 
-      const baseStatus =
+      let parseResult = payload.parse_result;
+      if (!parseResult && payload.job?.id) {
+        setUploadStatus("Upload complete. Indexing the PDF now...");
+        const completedJob = await waitForUploadJob(payload.job.id);
+        parseResult = completedJob.result ?? undefined;
+      }
+
+      const indexedStatus =
         payload.replaced_existing
           ? `Replaced and re-indexed ${payload.filename ?? uploadFile.name}.`
-          : `Saved and indexed ${payload.filename ?? uploadFile.name}.`;
+          : `Indexed ${payload.filename ?? uploadFile.name}.`;
 
-      setUploadStatus(baseStatus);
+      setUploadStatus(indexedStatus);
       setUploadResult({
         filename: payload.filename ?? uploadFile.name,
-        storedIn: payload.stored_in,
-        documentTitle: payload.parse_result?.document_title,
-        chapterCount: payload.parse_result?.chapter_count,
-        sectionCount: payload.parse_result?.section_count,
-        subsectionCount: payload.parse_result?.subsection_count,
+        documentTitle: parseResult?.document_title,
+        chapterCount: parseResult?.chapter_count,
+        sectionCount: parseResult?.section_count,
+        subsectionCount: parseResult?.subsection_count,
         replacedExisting: payload.replaced_existing ?? false,
         focusSwitchedTo: undefined,
       });
@@ -817,32 +886,24 @@ function ChatWorkspace() {
         fileInputRef.current.value = "";
       }
 
-      const jurisdictionsResponse = await fetch(`${CUSTOM_API_BASE}/jurisdictions`);
-      if (jurisdictionsResponse.ok) {
-        const jurisdictionsPayload = (await jurisdictionsResponse.json()) as {
-          jurisdictions?: JurisdictionOption[];
-        };
-        const nextJurisdictions = jurisdictionsPayload.jurisdictions ?? [];
-        setJurisdictions(nextJurisdictions);
-
-        const uploadedDocumentTitle = payload.parse_result?.document_title;
-        const uploadedJurisdiction = nextJurisdictions.find(
-          (option) => option.name === uploadedDocumentTitle,
+      const nextJurisdictions = await loadJurisdictions();
+      const uploadedDocumentTitle = parseResult?.document_title;
+      const uploadedJurisdiction = nextJurisdictions.find(
+        (option) => option.name === uploadedDocumentTitle,
+      );
+      if (uploadedJurisdiction) {
+        setSelectedJurisdiction(uploadedJurisdiction.name);
+        setUploadStatus(
+          `${indexedStatus} Code focus switched to ${uploadedJurisdiction.name}.`,
         );
-        if (uploadedJurisdiction) {
-          setSelectedJurisdiction(uploadedJurisdiction.name);
-          setUploadStatus(
-            `${baseStatus} Code focus switched to ${uploadedJurisdiction.name}.`,
-          );
-          setUploadResult((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  focusSwitchedTo: uploadedJurisdiction.name,
-                }
-              : previous,
-          );
-        }
+        setUploadResult((previous) =>
+          previous
+            ? {
+                ...previous,
+                focusSwitchedTo: uploadedJurisdiction.name,
+              }
+            : previous,
+        );
       }
     } catch (caughtError) {
       setUploadStatus("");
@@ -1057,9 +1118,6 @@ function ChatWorkspace() {
                           : uploadResult.replacedExisting
                             ? " replaced the existing PDF and was indexed successfully."
                             : " was indexed successfully."}
-                      </p>
-                      <p className="field-hint">
-                        Saved to: {uploadResult.storedIn ?? "backend/Data/PDF"}
                       </p>
                       <p className="field-hint">
                         Parsed structure: {uploadResult.chapterCount ?? 0} chapters,{" "}

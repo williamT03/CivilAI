@@ -186,6 +186,29 @@ def list_jurisdictions(current_user: Optional[UserResponse] = Depends(get_option
     return {"jurisdictions": TOOLKIT.list_jurisdictions(user_id=str(current_user.id) if current_user else None)}
 
 
+@app.get("/ingestion-jobs/{job_id}")
+def get_upload_job(
+    job_id: str,
+    current_user: Optional[UserResponse] = Depends(get_optional_current_user),
+):
+    job = get_ingestion_job_store().get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.")
+    if job.user_id and (current_user is None or str(current_user.id) != job.user_id):
+        raise HTTPException(status_code=404, detail="Ingestion job not found.")
+    return {
+        "id": job.id,
+        "filename": job.filename,
+        "status": job.status,
+        "stage": job.stage,
+        "progress": job.progress,
+        "error": job.error,
+        "result": job.result,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+    }
+
+
 @app.get("/navigation-map")
 def navigation_map(current_user: Optional[UserResponse] = Depends(get_optional_current_user)):
     return TOOLKIT.get_navigation_map(user_id=str(current_user.id) if current_user else None)
@@ -264,9 +287,6 @@ async def upload_pdf(
         return {
             "message": "PDF uploaded and queued for indexing.",
             "filename": os.path.basename(stored_file.local_path),
-            "path": stored_file.local_path,
-            "stored_in": PDF_DIR,
-            "storage_key": stored_file.storage_key,
             "checksum_sha256": stored_file.checksum_sha256,
             "replaced_existing": replaced_existing,
             "job": {
@@ -307,9 +327,6 @@ async def upload_pdf(
     return {
         "message": "PDF uploaded and indexed successfully.",
         "filename": os.path.basename(stored_file.local_path),
-        "path": stored_file.local_path,
-        "stored_in": PDF_DIR,
-        "storage_key": stored_file.storage_key,
         "checksum_sha256": stored_file.checksum_sha256,
         "replaced_existing": replaced_existing,
         "job": {
