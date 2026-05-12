@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import subprocess
@@ -11,6 +12,8 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
+
+logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -187,12 +190,21 @@ def query(
         user_id=str(current_user.id) if current_user else None,
         jurisdiction=jurisdiction,
     )
-    result = ask(
-        q,
-        jurisdiction=jurisdiction,
-        user_id=str(current_user.id) if current_user else None,
-        request_id=str(uuid.uuid4()),
-    )
+    try:
+        result = ask(
+            q,
+            jurisdiction=jurisdiction,
+            user_id=str(current_user.id) if current_user else None,
+            request_id=str(uuid.uuid4()),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("custom_query_failed jurisdiction=%s", jurisdiction)
+        raise HTTPException(
+            status_code=503,
+            detail="CivilAI query service is temporarily unavailable. Please try again in a moment.",
+        )
     return {
         "answer": result["answer"],
         "accuracy": result["accuracy"],

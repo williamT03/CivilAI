@@ -132,6 +132,58 @@ def _build_source_link(meta: dict) -> str | None:
     return url
 
 
+def _citation_for_result(result: dict) -> str:
+    meta = result.get("meta", {})
+    citation_parts = [
+        meta.get("jurisdiction"),
+        meta.get("section"),
+        meta.get("subsection"),
+    ]
+    citation = " ".join(str(part) for part in citation_parts if part)
+    return citation or "Retrieved code section"
+
+
+def _clean_evidence_text(result: dict, max_chars: int = 420) -> str:
+    text = (result.get("summary") or result.get("text") or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 3].rstrip()}..."
+
+
+def _build_extractive_answer(query: str, search_payload: dict) -> str:
+    """Create a grounded fallback answer when model providers are unavailable."""
+
+    results = search_payload.get("results", [])
+    if not results:
+        return "No relevant sections retrieved from the municipal code."
+
+    lines = [
+        "CivilAI found relevant ordinance evidence, but the answer generator is temporarily unavailable. "
+        "Here are the strongest retrieved code sections to review:"
+    ]
+    for index, result in enumerate(results[:3], start=1):
+        evidence = _clean_evidence_text(result)
+        citation = _citation_for_result(result)
+        if evidence:
+            lines.append(f"{index}. {citation}: {evidence}")
+        else:
+            lines.append(f"{index}. {citation}.")
+
+    navigation = search_payload.get("navigation", {})
+    top_chapters = navigation.get("top_chapters") or []
+    if top_chapters:
+        chapter_labels = [
+            f"{chapter.get('chapter_number')}: {chapter.get('chapter_name')}"
+            for chapter in top_chapters[:3]
+            if chapter.get("chapter_name")
+        ]
+        if chapter_labels:
+            lines.append(f"Likely chapters: {', '.join(chapter_labels)}.")
+
+    return "\n\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Public RAG entry point
 # ---------------------------------------------------------------------------
@@ -168,6 +220,8 @@ def ask(
             )
 
     answer = _generate_answer(query, search_payload, user_id=user_id, request_id=request_id)
+    if answer.lstrip().lower().startswith("error:"):
+        answer = _build_extractive_answer(query, search_payload)
     accuracy = _estimate_accuracy(query, search_payload)
 
     sources = [

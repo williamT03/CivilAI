@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProtectedRoute } from "../components/ProtectedRoute";
 import { SiteHeader } from "../components/SiteHeader";
 import { useAuth } from "../context/AuthContext";
+import { messageFromError, parseApiResponse } from "../lib/apiClient";
 import { AUTH_API_BASE, CUSTOM_API_BASE } from "../lib/apiConfig";
+import { fetchJurisdictions, queryCivilAi } from "../lib/chatApi";
 import { consumePendingChatPrompt } from "../lib/chatIntent";
 
 interface JurisdictionOption {
@@ -231,16 +233,7 @@ function ChatWorkspace() {
   }, [isGuest, token]);
 
   const loadJurisdictions = useCallback(async () => {
-    const response = await fetch(`${CUSTOM_API_BASE}/jurisdictions`, {
-      headers: buildApiHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error("Could not load jurisdictions");
-    }
-    const payload = (await response.json()) as {
-      jurisdictions?: JurisdictionOption[];
-    };
-    const nextJurisdictions = payload.jurisdictions ?? [];
+    const nextJurisdictions = await fetchJurisdictions(buildApiHeaders());
     setJurisdictions(nextJurisdictions);
     return nextJurisdictions;
   }, [buildApiHeaders]);
@@ -251,10 +244,7 @@ function ChatWorkspace() {
         const response = await fetch(`${CUSTOM_API_BASE}/ingestion-jobs/${jobId}`, {
           headers: buildApiHeaders(),
         });
-        if (!response.ok) {
-          throw new Error("Could not check indexing progress.");
-        }
-        const job = (await response.json()) as UploadJobResponse;
+        const job = await parseApiResponse<UploadJobResponse>(response);
 
         if (job.status === "succeeded") {
           return job;
@@ -444,11 +434,7 @@ function ChatWorkspace() {
           },
         });
 
-        if (!response.ok) {
-          throw new Error("Could not load saved chats.");
-        }
-
-        const payload = (await response.json()) as PersistedThreadSummaryPayload[];
+        const payload = await parseApiResponse<PersistedThreadSummaryPayload[]>(response);
         const nextThreads = payload.map(mapPersistedThreadSummary);
 
         if (!isMounted) {
@@ -511,11 +497,7 @@ function ChatWorkspace() {
             Authorization: `Bearer ${token}`,
           },
         });
-        if (!response.ok) {
-          throw new Error("Could not load thread detail.");
-        }
-
-        const payload = (await response.json()) as PersistedThreadDetailPayload;
+        const payload = await parseApiResponse<PersistedThreadDetailPayload>(response);
         if (!isMounted) {
           return;
         }
@@ -589,11 +571,7 @@ function ChatWorkspace() {
       }),
     });
 
-    if (!response.ok) {
-      throw new Error("Could not create a new chat.");
-    }
-
-    const payload = (await response.json()) as PersistedThreadSummaryPayload;
+    const payload = await parseApiResponse<PersistedThreadSummaryPayload>(response);
     const nextThread = mapPersistedThreadSummary(payload);
     setMessagesByThread((previous) => ({
       ...previous,
@@ -628,7 +606,7 @@ function ChatWorkspace() {
       return;
     }
 
-    const payload = (await response.json()) as PersistedThreadDetailPayload;
+    const payload = await parseApiResponse<PersistedThreadDetailPayload>(response);
     setMessagesByThread((previous) => ({
       ...previous,
       [threadId]: payload.messages.map(mapPersistedMessage),
@@ -690,43 +668,30 @@ function ChatWorkspace() {
 
     let assistantMessage: Message;
     try {
-      const params = new URLSearchParams();
-      params.set("q", userMessage.content);
-      if (selectedJurisdiction) {
-        params.set("jurisdiction", selectedJurisdiction);
-      }
-
       const headers: HeadersInit = {};
       if (token && !isGuest) {
         headers.Authorization = `Bearer ${token}`;
       }
-      const response = await fetch(`${CUSTOM_API_BASE}/query?${params.toString()}`, { headers });
-      const data = (await response.json()) as {
-        answer?: string;
-        accuracy?: Message["accuracy"];
-        jurisdiction?: string | null;
-        navigation?: Message["navigation"];
-        sources?: Message["sources"];
-        detail?: string;
-      };
+      const data = await queryCivilAi(userMessage.content, selectedJurisdiction, headers);
 
       assistantMessage = {
         id: `local-assistant-${Date.now()}`,
         role: "assistant",
-        content: response.ok
-          ? data.answer || "Sorry, I couldn't get a response."
-          : data.detail || "Sorry, I couldn't get a response.",
+        content: data.answer || "CivilAI could not find a grounded answer for that request.",
         accuracy: data.accuracy,
         resolvedJurisdiction: data.jurisdiction,
         navigation: data.navigation,
         sources: data.sources,
         timestamp: Date.now(),
       };
-    } catch {
+    } catch (caughtError) {
       assistantMessage = {
         id: `local-assistant-error-${Date.now()}`,
         role: "assistant",
-        content: "Sorry, there was an error processing your request.",
+        content: messageFromError(
+          caughtError,
+          "CivilAI could not reach the query service. Please try again in a moment.",
+        ),
         timestamp: Date.now(),
       };
     } finally {
@@ -778,7 +743,7 @@ function ChatWorkspace() {
         });
 
         if (response.ok) {
-          const payload = (await response.json()) as PersistedThreadSummaryPayload;
+          const payload = await parseApiResponse<PersistedThreadSummaryPayload>(response);
           updateThreadSummary(mapPersistedThreadSummary(payload));
         }
       } catch {
@@ -854,7 +819,7 @@ function ChatWorkspace() {
         body: formData,
       });
 
-      const payload = (await response.json()) as {
+      const payload = await parseApiResponse<{
         detail?: string;
         filename?: string;
         replaced_existing?: boolean;
@@ -870,11 +835,7 @@ function ChatWorkspace() {
           section_count?: number;
           subsection_count?: number;
         };
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.detail || "Upload failed.");
-      }
+      }>(response);
 
       let parseResult = payload.parse_result;
       if (!parseResult && payload.job?.id) {
