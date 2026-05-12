@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -46,3 +47,5 @@ def request(
         return HttpResponse(status=exc.code, body=body, headers=dict(exc.headers.items()))
     except URLError as exc:
         raise ConnectionError(str(exc.reason)) from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise ConnectionError(f"request timed out after {timeout_seconds}s") from exc

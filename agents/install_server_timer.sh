@@ -40,6 +40,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
   chmod 0640 "$ENV_FILE"
 fi
 
+if ! grep -q "^CIVILAI_AGENT_EXIT_ZERO=" "$ENV_FILE"; then
+  {
+    echo ""
+    echo "# Keep systemd timer healthy even when agents report findings."
+    echo "CIVILAI_AGENT_EXIT_ZERO=true"
+  } >> "$ENV_FILE"
+fi
+
 systemctl daemon-reload
 systemctl enable --now civilai-agents.timer
 
