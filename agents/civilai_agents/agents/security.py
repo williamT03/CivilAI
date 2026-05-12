@@ -7,6 +7,7 @@ from ..base import BaseAgent
 from ..commands import run_command
 from ..http import request
 from ..models import CheckResult
+from ..static_checks import auth_source_files, read_existing
 
 
 class SecurityAgent(BaseAgent):
@@ -38,8 +39,7 @@ class SecurityAgent(BaseAgent):
         return self.fail_result("env-gitignore", ".env should be ignored by git.")
 
     def _check_jwt_secret_configuration(self) -> CheckResult:
-        auth_file = self.repo_root / "backend" / "app" / "auth.py"
-        text = auth_file.read_text(encoding="utf-8", errors="replace")
+        text = read_existing(auth_source_files(self.repo_root))
         if "require_production_secret" in text and '"JWT_SECRET_KEY"' in text:
             return self.pass_result(
                 "jwt-secret",
@@ -56,8 +56,7 @@ class SecurityAgent(BaseAgent):
         return self.fail_result("jwt-secret", "JWT secret configuration was not found.")
 
     def _check_password_policy(self) -> CheckResult:
-        auth_file = self.repo_root / "backend" / "app" / "auth.py"
-        text = auth_file.read_text(encoding="utf-8", errors="replace")
+        text = read_existing(auth_source_files(self.repo_root))
         required_patterns = [r"min_length=8", r"\[A-Z\]", r"\[a-z\]", r"\[0-9\]"]
         missing = [pattern for pattern in required_patterns if not re.search(pattern, text)]
         if missing:
@@ -71,8 +70,7 @@ class SecurityAgent(BaseAgent):
         )
 
     def _check_api_key_hashing(self) -> CheckResult:
-        auth_file = self.repo_root / "backend" / "app" / "auth.py"
-        text = auth_file.read_text(encoding="utf-8", errors="replace")
+        text = read_existing(auth_source_files(self.repo_root))
         if "hashlib.sha256" in text and "key_hash" in text:
             return self.pass_result(
                 "api-key-storage", "API keys are stored as hashes with a visible prefix."

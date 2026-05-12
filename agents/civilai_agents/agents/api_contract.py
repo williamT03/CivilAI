@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import uuid
-
+from ..auth_client import create_test_user
 from ..base import BaseAgent
 from ..http import request
 from ..models import CheckResult
@@ -143,51 +142,21 @@ class ApiContractAgent(BaseAgent):
         )
 
     def _check_auth_happy_path(self) -> list[CheckResult]:
-        suffix = uuid.uuid4().hex[:10]
-        username = f"agent_{suffix}"
-        password = "AgentPass123"
-        email = f"{username}@example.test"
-
-        register_response = request(
-            "POST",
-            f"{self.context.backend_url}/api/auth/register",
-            json_body={
-                "email": email,
-                "username": username,
-                "password": password,
-                "full_name": "Agent Contract User",
-                "jurisdiction": "Test Jurisdiction",
-            },
-        )
-        if register_response.status != 201:
+        try:
+            test_user = create_test_user(self.context.backend_url, "agent_contract")
+        except RuntimeError as exc:
             return [
                 self.fail_result(
                     "auth-happy-path",
-                    "Could not register disposable test user.",
-                    status=register_response.status,
-                    body=register_response.body[-1000:],
+                    "Could not create and log in disposable test user.",
+                    error=str(exc),
                 )
             ]
 
-        login_response = request(
-            "POST",
-            f"{self.context.backend_url}/api/auth/login",
-            form_body={"username": username, "password": password},
-        )
-        if login_response.status != 200:
-            return [
-                self.fail_result(
-                    "auth-happy-path",
-                    "Disposable test user could not log in.",
-                    status=login_response.status,
-                )
-            ]
-
-        token = login_response.json().get("access_token")
         me_response = request(
             "GET",
             f"{self.context.backend_url}/api/auth/me",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=test_user.auth_headers,
         )
         if me_response.status != 200:
             return [

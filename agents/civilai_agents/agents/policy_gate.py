@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..base import BaseAgent
 from ..models import CheckResult
+from ..static_checks import auth_source_files, missing_strings, read_existing
 
 
 class PolicyGateAgent(BaseAgent):
@@ -12,7 +13,7 @@ class PolicyGateAgent(BaseAgent):
         return [
             self._gate(
                 "jwt-production-secret",
-                "backend/app/auth.py",
+                "auth",
                 ["require_production_secret", '"JWT_SECRET_KEY"'],
             ),
             self._gate(
@@ -25,12 +26,8 @@ class PolicyGateAgent(BaseAgent):
                 "backend/app/security.py",
                 ["audit_event", "sanitize_detail"],
             ),
-            self._gate(
-                "tenant-chat-filter", "backend/app/auth.py", ["chat_threads.c.user_id == user_id"]
-            ),
-            self._gate(
-                "tenant-api-key-filter", "backend/app/auth.py", ["api_keys.c.user_id == user_id"]
-            ),
+            self._gate("tenant-chat-filter", "auth", ["chat_threads.c.user_id == user_id"]),
+            self._gate("tenant-api-key-filter", "auth", ["api_keys.c.user_id == user_id"]),
             self._gate(
                 "upload-pdf-signature", "backend/app/app_custom.py", ["_validate_pdf_signature"]
             ),
@@ -40,8 +37,12 @@ class PolicyGateAgent(BaseAgent):
         ]
 
     def _gate(self, name: str, path: str, required: list[str]) -> CheckResult:
-        text = (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
-        missing = [item for item in required if item not in text]
+        text = (
+            read_existing(auth_source_files(self.repo_root))
+            if path == "auth"
+            else (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
+        )
+        missing = missing_strings(text, required)
         if missing:
             return self.fail_result(
                 name, "Required policy control is missing.", file=path, missing=missing

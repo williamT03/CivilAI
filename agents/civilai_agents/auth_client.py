@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from .http import request
 
 
-def create_test_user(backend_url: str, prefix: str = "agent") -> dict:
+@dataclass(frozen=True)
+class TestUser:
+    username: str
+    password: str
+    email: str
+    access_token: str
+    refresh_token: str
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.access_token}"}
+
+
+def create_test_user(backend_url: str, prefix: str = "agent") -> TestUser:
     suffix = uuid.uuid4().hex[:10]
     username = f"{prefix}_{suffix}"
     password = "AgentPass123"
@@ -36,10 +50,10 @@ def create_test_user(backend_url: str, prefix: str = "agent") -> dict:
         raise RuntimeError(f"login failed: {login_response.status} {login_response.body[:500]}")
 
     tokens = login_response.json()
-    return {
-        "username": username,
-        "password": password,
-        "email": email,
-        "access_token": tokens["access_token"],
-        "refresh_token": tokens["refresh_token"],
-    }
+    return TestUser(
+        username=username,
+        password=password,
+        email=email,
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+    )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..base import BaseAgent
 from ..http import request
 from ..models import CheckResult
+from ..static_checks import auth_source_files, read_existing
 
 
 class DeploymentGateAgent(BaseAgent):
@@ -20,9 +21,7 @@ class DeploymentGateAgent(BaseAgent):
         ]
 
     def _check_jwt_secret_enforced(self) -> CheckResult:
-        auth = (self.repo_root / "backend" / "app" / "auth.py").read_text(
-            encoding="utf-8", errors="replace"
-        )
+        auth = read_existing(auth_source_files(self.repo_root))
         if "require_production_secret" in auth and '"JWT_SECRET_KEY"' in auth:
             return self.pass_result(
                 "gate-jwt-secret", "JWT_SECRET_KEY is required in production/server environments."

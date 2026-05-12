@@ -5,6 +5,7 @@ import re
 from ..base import BaseAgent
 from ..http import request
 from ..models import CheckResult
+from ..static_checks import auth_source_files, read_existing
 
 SECRET_PATTERNS = {
     "openai_key": re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
@@ -124,10 +125,8 @@ class DataLeakAgent(BaseAgent):
         )
 
     def _check_api_key_listing_hides_secret(self) -> CheckResult:
-        auth_file = (self.repo_root / "backend" / "app" / "auth.py").read_text(
-            encoding="utf-8", errors="replace"
-        )
-        if "api_key=None" in auth_file and "response.api_key = secret" in auth_file:
+        auth_source = read_existing(auth_source_files(self.repo_root))
+        if "api_key=None" in auth_source and "response.api_key = secret" in auth_source:
             return self.pass_result(
                 "api-key-listing", "API key secret is only returned immediately after creation."
             )

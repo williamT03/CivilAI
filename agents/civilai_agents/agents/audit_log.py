@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..base import BaseAgent
 from ..models import CheckResult
+from ..static_checks import auth_source_files, read_existing
 
 
 class AuditLogAgent(BaseAgent):
@@ -9,13 +10,13 @@ class AuditLogAgent(BaseAgent):
     description = "Static coverage checks for security audit events across auth, uploads, queries, API keys, and rate limits."
 
     REQUIRED_EVENTS = {
-        "auth.register.success": "backend/app/auth.py",
-        "auth.login.success": "backend/app/auth.py",
-        "auth.login.failure": "backend/app/auth.py",
-        "auth.refresh.success": "backend/app/auth.py",
-        "auth.logout": "backend/app/auth.py",
-        "api_key.create": "backend/app/auth.py",
-        "api_key.revoke.success": "backend/app/auth.py",
+        "auth.register.success": "auth",
+        "auth.login.success": "auth",
+        "auth.login.failure": "auth",
+        "auth.refresh.success": "auth",
+        "auth.logout": "auth",
+        "api_key.create": "auth",
+        "api_key.revoke.success": "auth",
         "api.query": "backend/app/api/v1.py",
         "api.query.stream": "backend/app/api/v1.py",
         "custom.query": "backend/app/app_custom.py",
@@ -27,7 +28,10 @@ class AuditLogAgent(BaseAgent):
     def run(self) -> list[CheckResult]:
         results: list[CheckResult] = []
         for event, path in self.REQUIRED_EVENTS.items():
-            text = (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
+            if path == "auth":
+                text = read_existing(auth_source_files(self.repo_root))
+            else:
+                text = (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
             if event in text:
                 results.append(self.pass_result(f"audit-{event}", f"{event} is logged."))
             else:

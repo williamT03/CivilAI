@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..auth_client import create_test_user
+from ..auth_client import TestUser, create_test_user
 from ..base import BaseAgent
 from ..http import request
 from ..models import CheckResult
@@ -40,10 +40,10 @@ class TenantIsolationAgent(BaseAgent):
         ]
 
     @staticmethod
-    def _headers(user: dict) -> dict[str, str]:
-        return {"Authorization": f"Bearer {user['access_token']}"}
+    def _headers(user: TestUser) -> dict[str, str]:
+        return user.auth_headers
 
-    def _check_chat_thread_isolation(self, user_a: dict, user_b: dict) -> CheckResult:
+    def _check_chat_thread_isolation(self, user_a: TestUser, user_b: TestUser) -> CheckResult:
         create_response = request(
             "POST",
             f"{self.context.backend_url}/api/auth/chats",
@@ -73,7 +73,7 @@ class TenantIsolationAgent(BaseAgent):
             status=cross_response.status,
         )
 
-    def _check_api_key_isolation(self, user_a: dict, user_b: dict) -> CheckResult:
+    def _check_api_key_isolation(self, user_a: TestUser, user_b: TestUser) -> CheckResult:
         create_response = request(
             "POST",
             f"{self.context.backend_url}/api/auth/api-keys",
@@ -113,7 +113,7 @@ class TenantIsolationAgent(BaseAgent):
             "API key isolation passed, but creation response did not include the one-time secret as expected.",
         )
 
-    def _check_upload_listing_isolation(self, user_a: dict, user_b: dict) -> CheckResult:
+    def _check_upload_listing_isolation(self, user_a: TestUser, user_b: TestUser) -> CheckResult:
         response_a = request(
             "GET", f"{self.context.backend_url}/api/auth/uploads", headers=self._headers(user_a)
         )
@@ -131,7 +131,7 @@ class TenantIsolationAgent(BaseAgent):
             status_b=response_b.status,
         )
 
-    def _check_ingestion_job_auth_required(self, user_a: dict, user_b: dict) -> CheckResult:
+    def _check_ingestion_job_auth_required(self, user_a: TestUser, user_b: TestUser) -> CheckResult:
         fake_job_id = "00000000-0000-0000-0000-000000000000"
         unauthenticated = request(
             "GET", f"{self.context.backend_url}/api/v1/ingestion-jobs/{fake_job_id}"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..base import BaseAgent
 from ..models import CheckResult
+from ..static_checks import auth_source_files, read_existing
 
 
 class ThreatModelAgent(BaseAgent):
@@ -21,10 +22,12 @@ class ThreatModelAgent(BaseAgent):
         ]
 
     def _read(self, path: str) -> str:
+        if path == "auth":
+            return read_existing(auth_source_files(self.repo_root))
         return (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
 
     def _check_spoofing_controls(self) -> CheckResult:
-        auth = self._read("backend/app/auth.py")
+        auth = self._read("auth")
         expected = ["bcrypt", "jwt.decode", 'payload.type != "access"', "refresh_tokens"]
         missing = [item for item in expected if item not in auth]
         if missing:
@@ -58,7 +61,7 @@ class ThreatModelAgent(BaseAgent):
 
     def _check_repudiation_controls(self) -> CheckResult:
         security = self._read("backend/app/security.py")
-        auth = self._read("backend/app/auth.py")
+        auth = self._read("auth")
         if "audit_event" in security and "auth.login.success" in auth and "api_key.create" in auth:
             return self.pass_result(
                 "stride-repudiation", "Security audit events exist for auth and API-key actions."
@@ -91,7 +94,7 @@ class ThreatModelAgent(BaseAgent):
         )
 
     def _check_elevation_of_privilege_controls(self) -> CheckResult:
-        auth = self._read("backend/app/auth.py")
+        auth = self._read("auth")
         expected = [
             "current_user: UserResponse = Depends(get_current_user)",
             "user_id=current_user.id",
