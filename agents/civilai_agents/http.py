@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -25,8 +26,11 @@ def request(
     headers: dict[str, str] | None = None,
     json_body: dict | None = None,
     form_body: dict | None = None,
-    timeout_seconds: int = 10,
+    timeout_seconds: int | None = None,
 ) -> HttpResponse:
+    if timeout_seconds is None:
+        timeout_seconds = int(os.getenv("CIVILAI_AGENT_HTTP_TIMEOUT_SECONDS", "10"))
+
     payload = None
     request_headers = dict(headers or {})
 

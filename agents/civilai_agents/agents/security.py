@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+import sys
 
 from ..base import BaseAgent
 from ..commands import run_command
@@ -100,8 +100,11 @@ class SecurityAgent(BaseAgent):
         if self.context.skip_dependency_audit:
             return self.skip_result("dependency-audit", "Dependency audit skipped by flag.")
 
-        python_exe = self.repo_root / ".venv" / "Scripts" / "python.exe"
-        executable = str(python_exe) if python_exe.exists() else "python"
+        python_candidates = [
+            self.repo_root / ".venv" / "bin" / "python",
+            self.repo_root / ".venv" / "Scripts" / "python.exe",
+        ]
+        executable = next((str(path) for path in python_candidates if path.exists()), sys.executable)
         result = run_command([executable, "-m", "pip_audit", "-r", "requirements.txt"], self.repo_root, timeout_seconds=180)
 
         if result.returncode == 0:
