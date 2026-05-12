@@ -18,6 +18,9 @@ class HttpResponse:
     def json(self):
         return json.loads(self.body) if self.body else None
 
+    def header(self, name: str) -> str | None:
+        return self.headers.get(name.lower())
+
 
 def request(
     method: str,
@@ -45,10 +48,12 @@ def request(
     try:
         with urlopen(req, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8", errors="replace")
-            return HttpResponse(status=response.status, body=body, headers=dict(response.headers.items()))
+            headers = {key.lower(): value for key, value in response.headers.items()}
+            return HttpResponse(status=response.status, body=body, headers=headers)
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        return HttpResponse(status=exc.code, body=body, headers=dict(exc.headers.items()))
+        headers = {key.lower(): value for key, value in exc.headers.items()}
+        return HttpResponse(status=exc.code, body=body, headers=headers)
     except URLError as exc:
         raise ConnectionError(str(exc.reason)) from exc
     except (TimeoutError, socket.timeout) as exc:

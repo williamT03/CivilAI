@@ -48,7 +48,7 @@ class DeploymentGateAgent(BaseAgent):
             response = request("GET", f"{self.context.backend_url}/health")
         except ConnectionError as exc:
             return self.skip_result("gate-security-headers", "Backend is not reachable; header gate skipped.", error=str(exc))
-        missing = [header for header in ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"] if not response.headers.get(header)]
+        missing = [header for header in ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"] if not response.header(header)]
         if missing:
             return self.fail_result("gate-security-headers", "Backend is missing required security headers.", missing=missing)
         return self.pass_result("gate-security-headers", "Backend sends required security headers.")

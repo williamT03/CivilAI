@@ -80,7 +80,7 @@ class SecurityAgent(BaseAgent):
         missing = {
             header: value
             for header, value in expected.items()
-            if response.headers.get(header) != value
+            if response.header(header) != value
         }
         if missing:
             return self.fail_result("security-headers", "Backend response is missing expected security headers.", missing=missing)

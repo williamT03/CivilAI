@@ -113,7 +113,7 @@ class ServerConnectionsAgent(BaseAgent):
             return self.fail_result("cors-preflight", "CORS preflight timed out or was unreachable.", error=str(exc))
         if response.status not in {200, 204}:
             return self.fail_result("cors-preflight", "CORS preflight failed for configured frontend URL.", status=response.status)
-        allow_origin = response.headers.get("Access-Control-Allow-Origin")
+        allow_origin = response.header("Access-Control-Allow-Origin")
         if not allow_origin:
             return self.fail_result("cors-preflight", "CORS preflight did not return Access-Control-Allow-Origin.")
         return self.pass_result("cors-preflight", "CORS accepts the configured frontend URL.", allow_origin=allow_origin)
