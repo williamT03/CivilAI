@@ -47,7 +47,10 @@ class ServerConnectionsAgent(BaseAgent):
         return True
 
     def _check_v1_health_runtime_settings(self) -> CheckResult:
-        response = request("GET", f"{self.context.backend_url}/api/v1/health")
+        try:
+            response = request("GET", f"{self.context.backend_url}/api/v1/health")
+        except ConnectionError as exc:
+            return self.fail_result("server-v1-health", "v1 health endpoint timed out or was unreachable.", error=str(exc))
         if response.status != 200:
             return self.fail_result("server-v1-health", "v1 health endpoint is not reachable.", status=response.status)
 
@@ -59,7 +62,10 @@ class ServerConnectionsAgent(BaseAgent):
         return self.pass_result("server-v1-health", "v1 health exposes expected runtime settings.", settings={field: data[field] for field in expected_fields})
 
     def _check_custom_jurisdictions(self) -> CheckResult:
-        response = request("GET", f"{self.context.backend_url}/api/custom/jurisdictions")
+        try:
+            response = request("GET", f"{self.context.backend_url}/api/custom/jurisdictions")
+        except ConnectionError as exc:
+            return self.warn_result("custom-jurisdictions", "Custom jurisdictions endpoint timed out or was unreachable.", error=str(exc))
         if response.status != 200:
             return self.fail_result("custom-jurisdictions", "Custom jurisdictions endpoint failed.", status=response.status)
         data = response.json()
@@ -71,7 +77,10 @@ class ServerConnectionsAgent(BaseAgent):
         return self.pass_result("custom-jurisdictions", "Jurisdictions endpoint returns indexed options.", count=len(jurisdictions))
 
     def _check_custom_navigation_map(self) -> CheckResult:
-        response = request("GET", f"{self.context.backend_url}/api/custom/navigation-map")
+        try:
+            response = request("GET", f"{self.context.backend_url}/api/custom/navigation-map")
+        except ConnectionError as exc:
+            return self.warn_result("custom-navigation-map", "Navigation map endpoint timed out or was unreachable.", error=str(exc))
         if response.status != 200:
             return self.fail_result("custom-navigation-map", "Navigation map endpoint failed.", status=response.status)
         data = response.json()
@@ -80,7 +89,10 @@ class ServerConnectionsAgent(BaseAgent):
         return self.pass_result("custom-navigation-map", "Navigation map endpoint returns document structure.", document_count=len(data.get("documents", {})))
 
     def _check_metrics_endpoint(self) -> CheckResult:
-        response = request("GET", f"{self.context.backend_url}/metrics")
+        try:
+            response = request("GET", f"{self.context.backend_url}/metrics")
+        except ConnectionError as exc:
+            return self.warn_result("metrics", "Metrics endpoint timed out or was unreachable.", error=str(exc))
         if response.status == 200 and "civilai_http_requests_total" in response.body:
             return self.pass_result("metrics", "Prometheus metrics endpoint is available.")
         if response.status == 503:
@@ -88,14 +100,17 @@ class ServerConnectionsAgent(BaseAgent):
         return self.fail_result("metrics", "Metrics endpoint returned unexpected response.", status=response.status)
 
     def _check_cors_preflight(self) -> CheckResult:
-        response = request(
-            "OPTIONS",
-            f"{self.context.backend_url}/api/v1/health",
-            headers={
-                "Origin": self.context.frontend_url,
-                "Access-Control-Request-Method": "GET",
-            },
-        )
+        try:
+            response = request(
+                "OPTIONS",
+                f"{self.context.backend_url}/api/v1/health",
+                headers={
+                    "Origin": self.context.frontend_url,
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+        except ConnectionError as exc:
+            return self.fail_result("cors-preflight", "CORS preflight timed out or was unreachable.", error=str(exc))
         if response.status not in {200, 204}:
             return self.fail_result("cors-preflight", "CORS preflight failed for configured frontend URL.", status=response.status)
         allow_origin = response.headers.get("Access-Control-Allow-Origin")
@@ -104,11 +119,14 @@ class ServerConnectionsAgent(BaseAgent):
         return self.pass_result("cors-preflight", "CORS accepts the configured frontend URL.", allow_origin=allow_origin)
 
     def _check_auth_database_write_path(self) -> CheckResult:
-        response = request(
-            "POST",
-            f"{self.context.backend_url}/api/auth/register",
-            json_body={"email": "bad-email", "username": "x", "password": "weak"},
-        )
+        try:
+            response = request(
+                "POST",
+                f"{self.context.backend_url}/api/auth/register",
+                json_body={"email": "bad-email", "username": "x", "password": "weak"},
+            )
+        except ConnectionError as exc:
+            return self.fail_result("auth-db-route", "Auth validation route timed out or was unreachable.", error=str(exc))
         if response.status == 422:
             return self.pass_result("auth-db-route", "Auth route is mounted and validation works before writes.")
         return self.fail_result("auth-db-route", "Auth validation route returned unexpected status.", status=response.status)

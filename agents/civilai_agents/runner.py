@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .agents import AGENT_REGISTRY
-from .models import AgentContext, AgentReport, CheckStatus
+from .models import AgentContext, AgentReport, CheckResult, CheckStatus
 
 AGENT_GROUPS = {
     "all": list(AGENT_REGISTRY.keys()),
@@ -71,7 +71,17 @@ def main() -> int:
     for agent_name in selected:
         agent = AGENT_REGISTRY[agent_name](context)
         print(f"\n[{agent.name}] {agent.description}")
-        results = agent.run()
+        try:
+            results = agent.run()
+        except Exception as exc:
+            results = [
+                CheckResult(
+                    name="agent-exception",
+                    status=CheckStatus.FAIL,
+                    summary=f"{agent.name} crashed before completing.",
+                    details={"error": repr(exc)},
+                )
+            ]
         overall_results.extend(results)
         report = AgentReport.from_results(agent.name, results)
         report_path = report_dir / f"{agent.name}.json"
