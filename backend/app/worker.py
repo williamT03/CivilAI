@@ -31,13 +31,13 @@ def parse_pdf_job(self, job_id: str) -> dict:
     """Run the municipal-code parser/indexer for one queued upload."""
 
     try:
-        from backend.app.ingestion import get_ingestion_job_store
         from backend.app.auth import auth_db
+        from backend.app.ingestion import get_ingestion_job_store
         from backend.CustomRAG.db_scripts import ParserPipelineBuilder
         from backend.CustomRAG.tools import StructuredToolFactory
     except ImportError:  # pragma: no cover
-        from app.ingestion import get_ingestion_job_store
         from app.auth import auth_db
+        from app.ingestion import get_ingestion_job_store
         from CustomRAG.db_scripts import ParserPipelineBuilder
         from CustomRAG.tools import StructuredToolFactory
 
@@ -73,7 +73,9 @@ def parse_pdf_job(self, job_id: str) -> dict:
             except Exception:
                 pass
 
-        store.update_job(job_id, status="succeeded", stage="complete", progress=100, result=parse_result)
+        store.update_job(
+            job_id, status="succeeded", stage="complete", progress=100, result=parse_result
+        )
         return {"job_id": job_id, "status": "succeeded", "parse_result": parse_result}
     except Exception as exc:
         store.update_job(job_id, status="failed", stage="failed", progress=100, error=str(exc))

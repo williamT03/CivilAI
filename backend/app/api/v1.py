@@ -30,7 +30,6 @@ except ImportError:  # pragma: no cover
 
 from fastapi.security import OAuth2PasswordBearer
 
-
 router = APIRouter(prefix="/api/v1", tags=["platform"])
 OPTIONAL_OAUTH2_SCHEME = OAuth2PasswordBearer(auto_error=False, tokenUrl="/api/auth/login")
 
@@ -136,7 +135,9 @@ def _monthly_limit_for_user(user: Optional[UserResponse]) -> Optional[int]:
         return None
     subscription = auth_db.get_subscription(user.id)
     if subscription.status != "active":
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Subscription is not active.")
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Subscription is not active."
+        )
     if subscription.monthly_token_limit is not None:
         return subscription.monthly_token_limit
 
@@ -154,7 +155,9 @@ def _monthly_message_limit_for_user(user: Optional[UserResponse]) -> Optional[in
         return None
     subscription = auth_db.get_subscription(user.id)
     if subscription.status != "active":
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Subscription is not active.")
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Subscription is not active."
+        )
 
     settings = get_settings()
     tier = subscription.tier.lower()
@@ -180,7 +183,9 @@ def _enforce_usage_limit(user: Optional[UserResponse]) -> None:
     monthly_message_limit = _monthly_message_limit_for_user(user)
     if monthly_message_limit is None:
         return
-    used_messages = get_usage_tracker().monthly_message_count_for_user(str(user.id), now.year, now.month)
+    used_messages = get_usage_tracker().monthly_message_count_for_user(
+        str(user.id), now.year, now.month
+    )
     if used_messages >= monthly_message_limit:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -212,7 +217,9 @@ def query_v1(
     request_id = str(uuid.uuid4())
     user_id = str(current_user.id) if current_user else None
     _enforce_usage_limit(current_user)
-    audit_event("api.query", user_id=user_id, request_id=request_id, jurisdiction=payload.jurisdiction)
+    audit_event(
+        "api.query", user_id=user_id, request_id=request_id, jurisdiction=payload.jurisdiction
+    )
     result = ask(
         payload.question,
         top_k=payload.top_k,
@@ -223,7 +230,11 @@ def query_v1(
 
     if payload.save_to_thread_id and current_user:
         try:
-            from backend.app.auth import ChatAssistantMessageCreate, ChatTurnCreate, ChatUserMessageCreate
+            from backend.app.auth import (
+                ChatAssistantMessageCreate,
+                ChatTurnCreate,
+                ChatUserMessageCreate,
+            )
         except ImportError:  # pragma: no cover
             from app.auth import ChatAssistantMessageCreate, ChatTurnCreate, ChatUserMessageCreate
 
@@ -264,7 +275,12 @@ def query_stream_v1(
     request_id = str(uuid.uuid4())
     user_id = str(current_user.id) if current_user else None
     _enforce_usage_limit(current_user)
-    audit_event("api.query.stream", user_id=user_id, request_id=request_id, jurisdiction=payload.jurisdiction)
+    audit_event(
+        "api.query.stream",
+        user_id=user_id,
+        request_id=request_id,
+        jurisdiction=payload.jurisdiction,
+    )
     retrieval = retrieve(
         query=payload.question,
         top_k=payload.top_k,
@@ -305,8 +321,15 @@ def create_signed_upload_url(
     """Create a tenant-scoped signed upload URL for R2/S3 PDF uploads."""
 
     if not payload.filename.lower().endswith(".pdf"):
-        audit_event("upload.signed_url.failure", user_id=current_user.id, filename=payload.filename, reason="non_pdf")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF uploads are supported.")
+        audit_event(
+            "upload.signed_url.failure",
+            user_id=current_user.id,
+            filename=payload.filename,
+            reason="non_pdf",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF uploads are supported."
+        )
     try:
         audit_event("upload.signed_url.create", user_id=current_user.id, filename=payload.filename)
         return get_file_storage().create_presigned_upload_url(
@@ -338,7 +361,9 @@ def get_ingestion_job(
 
     job = get_ingestion_job_store().get_job(job_id, user_id=str(current_user.id))
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion job not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion job not found."
+        )
     return _job_to_response(job)
 
 
@@ -369,8 +394,12 @@ def subscription_usage(current_user: UserResponse = Depends(get_current_user)):
     monthly_message_limit = _monthly_message_limit_for_user(current_user)
     used_tokens = usage["input_tokens"] + usage["output_tokens"] + usage["embedding_tokens"]
     remaining = None if monthly_limit is None else max(0, monthly_limit - used_tokens)
-    used_messages = get_usage_tracker().monthly_message_count_for_user(str(current_user.id), now.year, now.month)
-    remaining_messages = None if monthly_message_limit is None else max(0, monthly_message_limit - used_messages)
+    used_messages = get_usage_tracker().monthly_message_count_for_user(
+        str(current_user.id), now.year, now.month
+    )
+    remaining_messages = (
+        None if monthly_message_limit is None else max(0, monthly_message_limit - used_messages)
+    )
     return SubscriptionUsageResponse(
         tier=subscription.tier,
         status=subscription.status,

@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "format": "prettier --write \"app/**/*.{ts,tsx,css,md}\" \"*.{js,mjs,ts,json,md}\"",
+    "format:check": "prettier --check \"app/**/*.{ts,tsx,css,md}\" \"*.{js,mjs,ts,json,md}\""
   },
   "dependencies": {
     "motion": "^12.38.0",
-    "next": "16.2.1",
+    "next": "^16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -22,7 +24,11 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "prettier": "^3.8.3",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
   }
 }

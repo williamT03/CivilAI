@@ -1,6 +1,6 @@
+import logging
 import os
 import sys
-import logging
 import time
 from collections import defaultdict, deque
 
@@ -68,16 +68,24 @@ if ENABLE_LLAMA_SERVER:
 settings = get_settings()
 app = FastAPI(title="Civil AI Backend", version="1.0.0")
 
-REQUEST_COUNT = Counter(
-    "civilai_http_requests_total",
-    "Total HTTP requests",
-    ["method", "path", "status"],
-) if Counter else None
-REQUEST_LATENCY = Histogram(
-    "civilai_http_request_duration_seconds",
-    "HTTP request latency",
-    ["method", "path"],
-) if Histogram else None
+REQUEST_COUNT = (
+    Counter(
+        "civilai_http_requests_total",
+        "Total HTTP requests",
+        ["method", "path", "status"],
+    )
+    if Counter
+    else None
+)
+REQUEST_LATENCY = (
+    Histogram(
+        "civilai_http_request_duration_seconds",
+        "HTTP request latency",
+        ["method", "path"],
+    )
+    if Histogram
+    else None
+)
 
 
 class RequestObservabilityMiddleware(BaseHTTPMiddleware):
@@ -87,11 +95,18 @@ class RequestObservabilityMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         except Exception:
             latency = time.perf_counter() - start
-            logger.exception("request_failed method=%s path=%s latency=%.4f", request.method, request.url.path, latency)
+            logger.exception(
+                "request_failed method=%s path=%s latency=%.4f",
+                request.method,
+                request.url.path,
+                latency,
+            )
             raise
 
         latency = time.perf_counter() - start
-        route_path = request.scope.get("route").path if request.scope.get("route") else request.url.path
+        route_path = (
+            request.scope.get("route").path if request.scope.get("route") else request.url.path
+        )
         logger.info(
             "request_complete method=%s path=%s status=%s latency=%.4f",
             request.method,
@@ -120,9 +135,13 @@ class SecurityBoundaryMiddleware(BaseHTTPMiddleware):
         if content_length:
             try:
                 if int(content_length) > self.max_request_bytes:
-                    return Response("Request body too large\n", status_code=413, media_type="text/plain")
+                    return Response(
+                        "Request body too large\n", status_code=413, media_type="text/plain"
+                    )
             except ValueError:
-                return Response("Invalid Content-Length\n", status_code=400, media_type="text/plain")
+                return Response(
+                    "Invalid Content-Length\n", status_code=400, media_type="text/plain"
+                )
 
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
@@ -138,8 +157,11 @@ class SecurityBoundaryMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
         return response
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -182,7 +204,9 @@ def health():
 @app.get("/metrics")
 def metrics():
     if generate_latest is None:
-        return Response("prometheus-client is not installed\n", media_type="text/plain", status_code=503)
+        return Response(
+            "prometheus-client is not installed\n", media_type="text/plain", status_code=503
+        )
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

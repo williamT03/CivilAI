@@ -23,7 +23,9 @@ def create_test_user(backend_url: str, prefix: str = "agent") -> dict:
         },
     )
     if register_response.status != 201:
-        raise RuntimeError(f"register failed: {register_response.status} {register_response.body[:500]}")
+        raise RuntimeError(
+            f"register failed: {register_response.status} {register_response.body[:500]}"
+        )
 
     login_response = request(
         "POST",

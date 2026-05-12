@@ -29,8 +29,8 @@ export default function AboutPage() {
           <div>
             <p className="eyebrow">Why it exists</p>
             <h2 className="section-title">
-              Because <span className="heading-accent">project decisions</span> should not depend
-              on PDF scavenger hunts.
+              Because <span className="heading-accent">project decisions</span> should not depend on
+              PDF scavenger hunts.
             </h2>
           </div>
           <p className="section-copy">

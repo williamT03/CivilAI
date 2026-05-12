@@ -169,9 +169,7 @@ function mapPersistedThreadSummary(payload: PersistedThreadSummaryPayload): Chat
   };
 }
 
-function mapPersistedMessage(
-  payload: PersistedThreadDetailPayload["messages"][number],
-): Message {
+function mapPersistedMessage(payload: PersistedThreadDetailPayload["messages"][number]): Message {
   return {
     id: `server-${payload.id}`,
     role: payload.role,
@@ -215,10 +213,7 @@ function ChatWorkspace() {
     [activeThreadId, messagesByThread],
   );
 
-  const guestThreadsKey = useMemo(
-    () => `civilai_guest_threads_${user?.id ?? "guest"}`,
-    [user?.id],
-  );
+  const guestThreadsKey = useMemo(() => `civilai_guest_threads_${user?.id ?? "guest"}`, [user?.id]);
   const guestActiveThreadKey = useMemo(
     () => `civilai_guest_active_thread_${user?.id ?? "guest"}`,
     [user?.id],
@@ -268,9 +263,7 @@ function ChatWorkspace() {
           throw new Error(job.error || "Indexing failed.");
         }
 
-        setUploadStatus(
-          `Indexing ${job.filename || "PDF"}... ${job.progress ?? 0}% complete`,
-        );
+        setUploadStatus(`Indexing ${job.filename || "PDF"}... ${job.progress ?? 0}% complete`);
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
 
@@ -370,13 +363,14 @@ function ChatWorkspace() {
     if (legacyMessagesRaw) {
       try {
         const legacyMessages = JSON.parse(legacyMessagesRaw) as Message[];
-        const migratedThread = createGuestThread(selectedJurisdiction || user?.jurisdiction || null);
-        migratedThread.title =
-          legacyMessages.find((message) => message.role === "user")?.content
-            ? buildThreadTitle(
-                legacyMessages.find((message) => message.role === "user")?.content ?? "",
-              )
-            : "Recent Chat";
+        const migratedThread = createGuestThread(
+          selectedJurisdiction || user?.jurisdiction || null,
+        );
+        migratedThread.title = legacyMessages.find((message) => message.role === "user")?.content
+          ? buildThreadTitle(
+              legacyMessages.find((message) => message.role === "user")?.content ?? "",
+            )
+          : "Recent Chat";
         migratedThread.messageCount = legacyMessages.length;
         migratedThread.preview = legacyMessages.length
           ? buildThreadPreview(legacyMessages[legacyMessages.length - 1].content)
@@ -400,7 +394,14 @@ function ChatWorkspace() {
     setMessagesByThread({});
     setActiveThreadId(null);
     setHasHydratedThreads(true);
-  }, [guestActiveThreadKey, guestThreadsKey, isGuest, legacyGuestMessagesKey, selectedJurisdiction, user?.jurisdiction]);
+  }, [
+    guestActiveThreadKey,
+    guestThreadsKey,
+    isGuest,
+    legacyGuestMessagesKey,
+    selectedJurisdiction,
+    user?.jurisdiction,
+  ]);
 
   useEffect(() => {
     if (!isGuest) {
@@ -649,10 +650,7 @@ function ChatWorkspace() {
     return createNewThread();
   }
 
-  async function sendPrompt(
-    promptText: string,
-    preferredThreadId?: string | null,
-  ): Promise<void> {
+  async function sendPrompt(promptText: string, preferredThreadId?: string | null): Promise<void> {
     const normalizedPrompt = promptText.trim();
     if (!normalizedPrompt || isLoadingResponse) {
       return;
@@ -800,7 +798,12 @@ function ChatWorkspace() {
   });
 
   useEffect(() => {
-    if (!hasHydratedThreads || isLoadingThreads || isLoadingResponse || homePromptHandledRef.current) {
+    if (
+      !hasHydratedThreads ||
+      isLoadingThreads ||
+      isLoadingResponse ||
+      homePromptHandledRef.current
+    ) {
       return;
     }
 
@@ -880,10 +883,9 @@ function ChatWorkspace() {
         parseResult = completedJob.result ?? undefined;
       }
 
-      const indexedStatus =
-        payload.replaced_existing
-          ? `Replaced and re-indexed ${payload.filename ?? uploadFile.name}.`
-          : `Indexed ${payload.filename ?? uploadFile.name}.`;
+      const indexedStatus = payload.replaced_existing
+        ? `Replaced and re-indexed ${payload.filename ?? uploadFile.name}.`
+        : `Indexed ${payload.filename ?? uploadFile.name}.`;
 
       setUploadStatus(indexedStatus);
       setUploadResult({
@@ -907,9 +909,7 @@ function ChatWorkspace() {
       );
       if (uploadedJurisdiction) {
         setSelectedJurisdiction(uploadedJurisdiction.name);
-        setUploadStatus(
-          `${indexedStatus} Code focus switched to ${uploadedJurisdiction.name}.`,
-        );
+        setUploadStatus(`${indexedStatus} Code focus switched to ${uploadedJurisdiction.name}.`);
         setUploadResult((previous) =>
           previous
             ? {
@@ -921,9 +921,7 @@ function ChatWorkspace() {
       }
     } catch (caughtError) {
       setUploadStatus("");
-      setUploadError(
-        caughtError instanceof Error ? caughtError.message : "Upload failed.",
-      );
+      setUploadError(caughtError instanceof Error ? caughtError.message : "Upload failed.");
     } finally {
       setIsUploading(false);
     }
@@ -976,7 +974,9 @@ function ChatWorkspace() {
                   research trails from one setup tray.
                 </p>
                 <div className="micro-ledger">
-                  <span>{threads.length} research thread{threads.length === 1 ? "" : "s"}</span>
+                  <span>
+                    {threads.length} research thread{threads.length === 1 ? "" : "s"}
+                  </span>
                   <span>{selectedJurisdiction || "All indexed codes"}</span>
                   <span>{uploadFile ? uploadFile.name : "No PDF selected"}</span>
                 </div>
@@ -984,184 +984,182 @@ function ChatWorkspace() {
             </div>
 
             {isSetupExpanded ? (
-            <div className="chat-setup-grid">
-              <div className="rail-block chat-control-card chat-memory-panel">
-                <div className="message-meta">
-                  <div>
-                    <p className="eyebrow">Research Threads</p>
-                    <h3 className="feature-title">Keep every lookup traceable</h3>
-                  </div>
-                  <button
-                    type="button"
-                    className="button button-subtle"
-                    onClick={() => void handleNewChat()}
-                  >
-                    New Chat
-                  </button>
-                </div>
-                {isLoadingThreads ? (
-                  <div className="spinner-row" style={{ justifyContent: "flex-start" }}>
-                    <span className="spinner" />
-                    <span className="muted-label">Loading saved chats</span>
-                  </div>
-                ) : threads.length ? (
-                  <div className="page-grid chat-history-list">
-                    {threads.map((thread) => {
-                      const isActive = thread.id === activeThreadId;
-                      return (
-                        <button
-                          key={thread.id}
-                          type="button"
-                          className={`thread-row ${isActive ? "thread-row-active" : ""}`}
-                          onClick={() => void handleSelectThread(thread.id)}
-                        >
-                          <div className="message-meta">
-                            <span>{thread.title}</span>
-                            <span>{new Date(thread.updatedAt).toLocaleDateString()}</span>
-                          </div>
-                          {thread.preview ? (
-                            <p className="field-hint">{thread.preview}</p>
-                          ) : (
-                            <p className="field-hint">No messages yet.</p>
-                          )}
-                          <p className="field-hint">
-                            {thread.messageCount} message{thread.messageCount === 1 ? "" : "s"}
-                            {thread.jurisdiction ? ` · ${thread.jurisdiction}` : ""}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="upload-note">
-                    No research threads yet. Start with one real code question and CivilAI will
-                    keep the lookup grouped for follow-up.
-                  </p>
-                )}
-                <p className="upload-note">
-                  {isGuest
-                    ? "Guest mode keeps history in this browser for quick tests."
-                    : "Signed-in accounts keep the source trail available across sessions."}
-                </p>
-              </div>
-
-              <div className="rail-block chat-control-card">
-                <div>
-                  <p className="eyebrow">Jurisdiction Lens</p>
-                  <h3 className="feature-title">Aim the answer at the right code</h3>
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="jurisdictionSearch">
-                    Search scope
-                  </label>
-                  <div className="searchable-select-row">
-                    <input
-                      id="jurisdictionSearch"
-                      className="field-input"
-                      type="search"
-                      list="jurisdictionOptions"
-                      value={jurisdictionSearch}
-                      placeholder="Type a city or county..."
-                      autoComplete="off"
-                      onChange={(event) => handleJurisdictionSearchChange(event.target.value)}
-                    />
-                    {jurisdictionSearch ? (
-                      <button
-                        type="button"
-                        className="button button-subtle compact-action"
-                        onClick={clearJurisdictionSearch}
-                      >
-                        Clear
-                      </button>
-                    ) : null}
-                  </div>
-                  <datalist id="jurisdictionOptions">
-                    {jurisdictions.map((option) => (
-                      <option key={option.name} value={option.name} />
-                    ))}
-                  </datalist>
-                </div>
-                <p className="upload-note">
-                  Type a city or county, or leave this blank to search all indexed codes.
-                </p>
-              </div>
-
-              <div className="rail-block chat-control-card">
-                <div>
-                  <p className="eyebrow">Document Intake</p>
-                  <h3 className="feature-title">Add the ordinance you need searched</h3>
-                </div>
-                <form className="form-grid" onSubmit={handleUpload}>
-                  <div className="field">
-                    <label className="field-label" htmlFor="pdfFile">
-                      PDF file
-                    </label>
-                    <input
-                      id="pdfFile"
-                      ref={fileInputRef}
-                      className="field-input"
-                      type="file"
-                      accept="application/pdf"
-                      disabled={isUploading}
-                      onChange={(event) =>
-                        setUploadFile(event.target.files?.[0] ?? null)
-                      }
-                    />
-                  </div>
-                  {uploadFile ? (
-                    <p className="field-hint">
-                      Ready to upload: <strong>{uploadFile.name}</strong>
-                    </p>
-                  ) : (
-                    <p className="field-hint">
-                      CivilAI stores the PDF, extracts sections and subsections, then makes the
-                      document searchable for grounded answers.
-                    </p>
-                  )}
-                  <div className="upload-row">
+              <div className="chat-setup-grid">
+                <div className="rail-block chat-control-card chat-memory-panel">
+                  <div className="message-meta">
+                    <div>
+                      <p className="eyebrow">Research Threads</p>
+                      <h3 className="feature-title">Keep every lookup traceable</h3>
+                    </div>
                     <button
-                      type="submit"
-                      className="button button-primary"
-                      disabled={!uploadFile || isUploading}
+                      type="button"
+                      className="button button-subtle"
+                      onClick={() => void handleNewChat()}
                     >
-                      {isUploading ? "Indexing..." : "Index PDF"}
+                      New Chat
                     </button>
                   </div>
-                  {uploadStatus ? (
-                    <div className="status-banner status-success">{uploadStatus}</div>
-                  ) : null}
-                  {uploadError ? (
-                    <div className="status-banner status-error">{uploadError}</div>
-                  ) : null}
-                  {uploadResult ? (
-                    <div className="upload-result-panel">
-                      <p className="eyebrow">Indexed and Ready</p>
-                      <p className="section-copy">
-                        <strong>{uploadResult.filename}</strong>
-                        {uploadResult.documentTitle
-                          ? uploadResult.replacedExisting
-                            ? ` replaced the existing PDF and was re-indexed as ${uploadResult.documentTitle}.`
-                            : ` was indexed as ${uploadResult.documentTitle}.`
-                          : uploadResult.replacedExisting
-                            ? " replaced the existing PDF and was indexed successfully."
-                            : " was indexed successfully."}
-                      </p>
-                      <p className="field-hint">
-                        Parsed structure: {uploadResult.chapterCount ?? 0} chapters,{" "}
-                        {uploadResult.sectionCount ?? 0} sections,{" "}
-                        {uploadResult.subsectionCount ?? 0} subsections
-                      </p>
-                      {uploadResult.focusSwitchedTo ? (
-                        <p className="field-hint">
-                          Active code focus switched to{" "}
-                          <strong>{uploadResult.focusSwitchedTo}</strong>.
-                        </p>
+                  {isLoadingThreads ? (
+                    <div className="spinner-row" style={{ justifyContent: "flex-start" }}>
+                      <span className="spinner" />
+                      <span className="muted-label">Loading saved chats</span>
+                    </div>
+                  ) : threads.length ? (
+                    <div className="page-grid chat-history-list">
+                      {threads.map((thread) => {
+                        const isActive = thread.id === activeThreadId;
+                        return (
+                          <button
+                            key={thread.id}
+                            type="button"
+                            className={`thread-row ${isActive ? "thread-row-active" : ""}`}
+                            onClick={() => void handleSelectThread(thread.id)}
+                          >
+                            <div className="message-meta">
+                              <span>{thread.title}</span>
+                              <span>{new Date(thread.updatedAt).toLocaleDateString()}</span>
+                            </div>
+                            {thread.preview ? (
+                              <p className="field-hint">{thread.preview}</p>
+                            ) : (
+                              <p className="field-hint">No messages yet.</p>
+                            )}
+                            <p className="field-hint">
+                              {thread.messageCount} message{thread.messageCount === 1 ? "" : "s"}
+                              {thread.jurisdiction ? ` · ${thread.jurisdiction}` : ""}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="upload-note">
+                      No research threads yet. Start with one real code question and CivilAI will
+                      keep the lookup grouped for follow-up.
+                    </p>
+                  )}
+                  <p className="upload-note">
+                    {isGuest
+                      ? "Guest mode keeps history in this browser for quick tests."
+                      : "Signed-in accounts keep the source trail available across sessions."}
+                  </p>
+                </div>
+
+                <div className="rail-block chat-control-card">
+                  <div>
+                    <p className="eyebrow">Jurisdiction Lens</p>
+                    <h3 className="feature-title">Aim the answer at the right code</h3>
+                  </div>
+                  <div className="field">
+                    <label className="field-label" htmlFor="jurisdictionSearch">
+                      Search scope
+                    </label>
+                    <div className="searchable-select-row">
+                      <input
+                        id="jurisdictionSearch"
+                        className="field-input"
+                        type="search"
+                        list="jurisdictionOptions"
+                        value={jurisdictionSearch}
+                        placeholder="Type a city or county..."
+                        autoComplete="off"
+                        onChange={(event) => handleJurisdictionSearchChange(event.target.value)}
+                      />
+                      {jurisdictionSearch ? (
+                        <button
+                          type="button"
+                          className="button button-subtle compact-action"
+                          onClick={clearJurisdictionSearch}
+                        >
+                          Clear
+                        </button>
                       ) : null}
                     </div>
-                  ) : null}
-                </form>
+                    <datalist id="jurisdictionOptions">
+                      {jurisdictions.map((option) => (
+                        <option key={option.name} value={option.name} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <p className="upload-note">
+                    Type a city or county, or leave this blank to search all indexed codes.
+                  </p>
+                </div>
+
+                <div className="rail-block chat-control-card">
+                  <div>
+                    <p className="eyebrow">Document Intake</p>
+                    <h3 className="feature-title">Add the ordinance you need searched</h3>
+                  </div>
+                  <form className="form-grid" onSubmit={handleUpload}>
+                    <div className="field">
+                      <label className="field-label" htmlFor="pdfFile">
+                        PDF file
+                      </label>
+                      <input
+                        id="pdfFile"
+                        ref={fileInputRef}
+                        className="field-input"
+                        type="file"
+                        accept="application/pdf"
+                        disabled={isUploading}
+                        onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                      />
+                    </div>
+                    {uploadFile ? (
+                      <p className="field-hint">
+                        Ready to upload: <strong>{uploadFile.name}</strong>
+                      </p>
+                    ) : (
+                      <p className="field-hint">
+                        CivilAI stores the PDF, extracts sections and subsections, then makes the
+                        document searchable for grounded answers.
+                      </p>
+                    )}
+                    <div className="upload-row">
+                      <button
+                        type="submit"
+                        className="button button-primary"
+                        disabled={!uploadFile || isUploading}
+                      >
+                        {isUploading ? "Indexing..." : "Index PDF"}
+                      </button>
+                    </div>
+                    {uploadStatus ? (
+                      <div className="status-banner status-success">{uploadStatus}</div>
+                    ) : null}
+                    {uploadError ? (
+                      <div className="status-banner status-error">{uploadError}</div>
+                    ) : null}
+                    {uploadResult ? (
+                      <div className="upload-result-panel">
+                        <p className="eyebrow">Indexed and Ready</p>
+                        <p className="section-copy">
+                          <strong>{uploadResult.filename}</strong>
+                          {uploadResult.documentTitle
+                            ? uploadResult.replacedExisting
+                              ? ` replaced the existing PDF and was re-indexed as ${uploadResult.documentTitle}.`
+                              : ` was indexed as ${uploadResult.documentTitle}.`
+                            : uploadResult.replacedExisting
+                              ? " replaced the existing PDF and was indexed successfully."
+                              : " was indexed successfully."}
+                        </p>
+                        <p className="field-hint">
+                          Parsed structure: {uploadResult.chapterCount ?? 0} chapters,{" "}
+                          {uploadResult.sectionCount ?? 0} sections,{" "}
+                          {uploadResult.subsectionCount ?? 0} subsections
+                        </p>
+                        {uploadResult.focusSwitchedTo ? (
+                          <p className="field-hint">
+                            Active code focus switched to{" "}
+                            <strong>{uploadResult.focusSwitchedTo}</strong>.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </form>
+                </div>
               </div>
-            </div>
             ) : null}
           </section>
 
@@ -1170,7 +1168,11 @@ function ChatWorkspace() {
               <div className="message-list">
                 {activeMessages.length === 0 ? (
                   <div className="chat-empty">
-                    <h3>{threads.length ? "Open a research trail or start a fresh one." : "Ask the kind of question that slows a review down."}</h3>
+                    <h3>
+                      {threads.length
+                        ? "Open a research trail or start a fresh one."
+                        : "Ask the kind of question that slows a review down."}
+                    </h3>
                     <p>
                       Try “What does Broward County say about noise after 9 p.m.?” or “Summarize
                       section 1-2 for Cooper City and cite the source.”

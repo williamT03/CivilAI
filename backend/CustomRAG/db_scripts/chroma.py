@@ -162,9 +162,9 @@ class ChromaDocumentBuilder:
                 )
 
                 for subsection in section.subsections:
-                    payload.nodes_by_collection[ChromaCollectionFactory.SUBSECTION_COLLECTION].append(
-                        self._build_subsection_node(blueprint, chapter, section, subsection)
-                    )
+                    payload.nodes_by_collection[
+                        ChromaCollectionFactory.SUBSECTION_COLLECTION
+                    ].append(self._build_subsection_node(blueprint, chapter, section, subsection))
 
         return payload
 
@@ -256,7 +256,9 @@ class ChromaDocumentBuilder:
             embedding=self.embedding_provider(text_body),
         )
 
-    def _build_subsection_node(self, blueprint: DocumentDefinition, chapter, section, subsection) -> ChromaNode:
+    def _build_subsection_node(
+        self, blueprint: DocumentDefinition, chapter, section, subsection
+    ) -> ChromaNode:
         # Subsection nodes are the deepest structured units in this first version.
         subsection_body = (subsection.subsection_text or "").strip()
         text_body = (
@@ -375,7 +377,9 @@ def create_runtime_chroma_builder(model_name: str | None = None) -> ChromaDocume
     if embedding_provider_name in {"openai", "deepseek"}:
         return ChromaDocumentBuilder(embedding_provider=RoutedEmbeddingProvider())
 
-    return ChromaDocumentBuilder(embedding_provider=SentenceTransformerEmbeddingProvider(model_name=model_name))
+    return ChromaDocumentBuilder(
+        embedding_provider=SentenceTransformerEmbeddingProvider(model_name=model_name)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +589,9 @@ class ChromaManager:
                 embeddings=[node.embedding for node in batch],
             )
 
-    def _normalize_metadata(self, metadata: dict[str, str | int | float | bool]) -> dict[str, str | int | float | bool]:
+    def _normalize_metadata(
+        self, metadata: dict[str, str | int | float | bool]
+    ) -> dict[str, str | int | float | bool]:
         """Coerce metadata into Chroma-safe scalar values only."""
 
         normalized: dict[str, str | int | float | bool] = {}
@@ -738,7 +744,9 @@ class QdrantStructuredManager:
                 counts[collection_name] = 0
                 continue
             try:
-                counts[collection_name] = int(self.client.count(collection_name=collection_name).count)
+                counts[collection_name] = int(
+                    self.client.count(collection_name=collection_name).count
+                )
             except Exception:
                 counts[collection_name] = 0
         return counts
@@ -782,11 +790,7 @@ class QdrantStructuredManager:
         for point in response.points:
             payload = dict(point.payload or {})
             document = str(payload.pop("document", ""))
-            metadata = {
-                key: value
-                for key, value in payload.items()
-                if key not in {"node_id"}
-            }
+            metadata = {key: value for key, value in payload.items() if key not in {"node_id"}}
             results.append(
                 {
                     "id": str(payload.get("node_id") or point.id),
@@ -844,7 +848,9 @@ class QdrantStructuredManager:
         except Exception:
             return False
 
-    def _normalize_metadata(self, metadata: dict[str, str | int | float | bool]) -> dict[str, str | int | float | bool]:
+    def _normalize_metadata(
+        self, metadata: dict[str, str | int | float | bool]
+    ) -> dict[str, str | int | float | bool]:
         normalized: dict[str, str | int | float | bool] = {}
         for key, value in metadata.items():
             if value is None:

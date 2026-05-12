@@ -141,8 +141,10 @@ export default function HomePage() {
                 <span className="desk-line" />
               </div>
               <div className="desk-stamp">
-                CivilAI<br />
-                Ordinance RAG<br />
+                CivilAI
+                <br />
+                Ordinance RAG
+                <br />
                 Source checked
               </div>
               <div className="desk-board-footer">
@@ -182,8 +184,8 @@ export default function HomePage() {
             </h2>
           </div>
           <p className="section-copy">
-            Start with the thing you need to decide: a setback, a permit threshold, a noise rule,
-            a penalty, or a section summary. CivilAI carries that prompt into the chat workspace so
+            Start with the thing you need to decide: a setback, a permit threshold, a noise rule, a
+            penalty, or a section summary. CivilAI carries that prompt into the chat workspace so
             the research starts where your work actually begins.
           </p>
         </div>
@@ -201,11 +203,7 @@ export default function HomePage() {
           />
 
           <div className="composer-actions">
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={isStartingPrompt}
-            >
+            <button type="submit" className="button button-primary" disabled={isStartingPrompt}>
               {isAuthenticated
                 ? isStartingPrompt
                   ? "Opening workspace..."
@@ -286,7 +284,9 @@ export default function HomePage() {
         <div className="section-grid">
           <div>
             <p className="eyebrow">What it actually does</p>
-            <h2 className="section-title">CivilAI is structured for ordinance work, not general chat.</h2>
+            <h2 className="section-title">
+              CivilAI is structured for ordinance work, not general chat.
+            </h2>
           </div>
           <div className="process-flow">
             <div className="process-step">

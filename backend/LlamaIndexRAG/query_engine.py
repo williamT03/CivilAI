@@ -1,7 +1,6 @@
 from llama_index.core.prompts import PromptTemplate
 
-QA_PROMPT = PromptTemplate(
-"""
+QA_PROMPT = PromptTemplate("""
 You are a civil engineering assistant specialized in municipal codes.
 
 Use the provided context to answer the question accurately.
@@ -18,5 +17,4 @@ Question:
 {query_str}
 
 Answer:
-"""
-)
+""")

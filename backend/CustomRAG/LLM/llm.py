@@ -100,23 +100,22 @@ def build_prompt(
     """Build the final tool-aware prompt sent to Ollama."""
 
     if jurisdiction_label:
-        assistant_scope = f"a civil engineering and municipal law assistant for {jurisdiction_label}"
+        assistant_scope = (
+            f"a civil engineering and municipal law assistant for {jurisdiction_label}"
+        )
     else:
         assistant_scope = "a civil engineering and municipal law assistant for ordinance research"
 
     summary_block = ""
     if summary_preview:
-        summary_block = textwrap.dedent(
-            f"""\
+        summary_block = textwrap.dedent(f"""\
             STRUCTURED SUMMARY PREVIEW:
             ════════════════════════════════════════
             {summary_preview}
             ════════════════════════════════════════
-            """
-        )
+            """)
 
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         You are {assistant_scope}.
 
         Answer the question using ONLY the provided ordinance evidence below.
@@ -150,8 +149,7 @@ def build_prompt(
         {query}
 
         ANSWER:
-        """
-    )
+        """)
 
 
 # ---------------------------------------------------------------------------

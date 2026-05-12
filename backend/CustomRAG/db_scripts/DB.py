@@ -27,7 +27,6 @@ from sqlalchemy import (
     text,
 )
 
-
 # ---------------------------------------------------------------------------
 # Data transfer objects
 # ---------------------------------------------------------------------------
@@ -126,7 +125,9 @@ class DocumentSchemaBuilder:
         self._document_title = document_title.strip()
         base_slug = DatabaseManager.make_slug(document_title)
         if owner_user_id and visibility == "private":
-            self._document_slug = f"{base_slug}__user_{DatabaseManager.make_slug(str(owner_user_id))}"
+            self._document_slug = (
+                f"{base_slug}__user_{DatabaseManager.make_slug(str(owner_user_id))}"
+            )
         else:
             self._document_slug = base_slug
         self._source_filename = source_filename
@@ -294,7 +295,12 @@ class RelationalSchemaFactory:
             "chapters",
             metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
-            Column("document_id", Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False),
+            Column(
+                "document_id",
+                Integer,
+                ForeignKey("documents.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             Column("chapter_number", String(100), nullable=False),
             Column("chapter_name", String(255), nullable=False),
             Column("toc_page", Integer, nullable=True),
@@ -307,7 +313,9 @@ class RelationalSchemaFactory:
             "sections",
             metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
-            Column("chapter_id", Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False),
+            Column(
+                "chapter_id", Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False
+            ),
             Column("section_number", String(150), nullable=False),
             Column("subsection_count", Integer, nullable=False, default=0),
             Column("section_summary", Text, nullable=True),
@@ -321,12 +329,16 @@ class RelationalSchemaFactory:
             "subsections",
             metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
-            Column("section_id", Integer, ForeignKey("sections.id", ondelete="CASCADE"), nullable=False),
+            Column(
+                "section_id", Integer, ForeignKey("sections.id", ondelete="CASCADE"), nullable=False
+            ),
             Column("subsection_number", String(150), nullable=False),
             Column("subsection_summary", Text, nullable=True),
             Column("subsection_text", Text, nullable=True),
             Column("page_number", Integer, nullable=True),
-            UniqueConstraint("section_id", "subsection_number", name="uq_subsections_section_number"),
+            UniqueConstraint(
+                "section_id", "subsection_number", name="uq_subsections_section_number"
+            ),
         )
 
         return {
@@ -568,7 +580,9 @@ class DatabaseManager:
                 )
 
             if section_ids:
-                connection.execute(delete(subsections).where(subsections.c.section_id.in_(section_ids)))
+                connection.execute(
+                    delete(subsections).where(subsections.c.section_id.in_(section_ids))
+                )
 
             if chapter_ids:
                 connection.execute(delete(sections).where(sections.c.chapter_id.in_(chapter_ids)))
@@ -586,14 +600,10 @@ class DatabaseManager:
         with self.engine.begin() as connection:
             # Delete bottom-up so each pass leaves the remaining hierarchy valid.
             connection.execute(
-                delete(subsections).where(
-                    ~subsections.c.section_id.in_(select(sections.c.id))
-                )
+                delete(subsections).where(~subsections.c.section_id.in_(select(sections.c.id)))
             )
             connection.execute(
-                delete(sections).where(
-                    ~sections.c.chapter_id.in_(select(chapters.c.id))
-                )
+                delete(sections).where(~sections.c.chapter_id.in_(select(chapters.c.id)))
             )
             connection.execute(
                 delete(chapters).where(
@@ -613,12 +623,18 @@ class DatabaseManager:
 
         with self.engine.begin() as connection:
             if "owner_user_id" not in existing_columns:
-                connection.execute(text("ALTER TABLE documents ADD COLUMN owner_user_id VARCHAR(64)"))
+                connection.execute(
+                    text("ALTER TABLE documents ADD COLUMN owner_user_id VARCHAR(64)")
+                )
             if "visibility" not in existing_columns:
-                connection.execute(text("ALTER TABLE documents ADD COLUMN visibility VARCHAR(32) DEFAULT 'public'"))
+                connection.execute(
+                    text("ALTER TABLE documents ADD COLUMN visibility VARCHAR(32) DEFAULT 'public'")
+                )
             connection.execute(
                 documents.update()
-                .where((documents.c.visibility == None) | (documents.c.visibility == ""))  # noqa: E711
+                .where(
+                    (documents.c.visibility == None) | (documents.c.visibility == "")
+                )  # noqa: E711
                 .values(visibility="public")
             )
 
@@ -636,7 +652,9 @@ class DatabaseManager:
                 connection.execute(text("ALTER TABLE sections ADD COLUMN page_number INTEGER"))
 
             try:
-                subsection_columns = {column["name"] for column in inspector.get_columns("subsections")}
+                subsection_columns = {
+                    column["name"] for column in inspector.get_columns("subsections")
+                }
             except sqlalchemy.exc.NoSuchTableError:
                 subsection_columns = set()
             if subsection_columns and "page_number" not in subsection_columns:
@@ -666,7 +684,9 @@ class DatabaseManager:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    def fetch_document_hierarchy(self, document_title_or_slug: str, user_id: str | None = None) -> dict | None:
+    def fetch_document_hierarchy(
+        self, document_title_or_slug: str, user_id: str | None = None
+    ) -> dict | None:
         """Return one document as a nested dictionary for debugging or API responses."""
 
         documents = self.tables["documents"]
@@ -677,44 +697,60 @@ class DatabaseManager:
 
         with self.engine.begin() as connection:
             # Resolve the root document row first.
-            document_row = connection.execute(
-                select(documents).where(
-                    (
-                        (documents.c.document_title == document_title_or_slug)
-                        | (documents.c.document_slug == document_title_or_slug)
-                        | (documents.c.document_slug == document_slug)
-                    ),
-                    self._tenant_visibility_filter(documents, user_id),
+            document_row = (
+                connection.execute(
+                    select(documents).where(
+                        (
+                            (documents.c.document_title == document_title_or_slug)
+                            | (documents.c.document_slug == document_title_or_slug)
+                            | (documents.c.document_slug == document_slug)
+                        ),
+                        self._tenant_visibility_filter(documents, user_id),
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
             if document_row is None:
                 return None
 
             # Fetch all chapters under the document in chapter-number order.
-            chapter_rows = connection.execute(
-                select(chapters)
-                .where(chapters.c.document_id == document_row["id"])
-                .order_by(chapters.c.id)
-            ).mappings().all()
+            chapter_rows = (
+                connection.execute(
+                    select(chapters)
+                    .where(chapters.c.document_id == document_row["id"])
+                    .order_by(chapters.c.id)
+                )
+                .mappings()
+                .all()
+            )
 
             chapter_payloads: list[dict] = []
             for chapter_row in chapter_rows:
                 # Fetch all sections under the chapter before moving on.
-                section_rows = connection.execute(
-                    select(sections)
-                    .where(sections.c.chapter_id == chapter_row["id"])
-                    .order_by(sections.c.id)
-                ).mappings().all()
+                section_rows = (
+                    connection.execute(
+                        select(sections)
+                        .where(sections.c.chapter_id == chapter_row["id"])
+                        .order_by(sections.c.id)
+                    )
+                    .mappings()
+                    .all()
+                )
 
                 section_payloads: list[dict] = []
                 for section_row in section_rows:
                     # Fetch all subsections for the section to complete the hierarchy.
-                    subsection_rows = connection.execute(
-                        select(subsections)
-                        .where(subsections.c.section_id == section_row["id"])
-                        .order_by(subsections.c.id)
-                    ).mappings().all()
+                    subsection_rows = (
+                        connection.execute(
+                            select(subsections)
+                            .where(subsections.c.section_id == section_row["id"])
+                            .order_by(subsections.c.id)
+                        )
+                        .mappings()
+                        .all()
+                    )
 
                     section_payloads.append(
                         {
@@ -762,24 +798,32 @@ class DatabaseManager:
 
         with self.engine.begin() as connection:
             # Join chapters so we can expose a quick chapter count per stored document.
-            rows = connection.execute(
-                select(
-                    documents.c.document_title,
-                    documents.c.document_slug,
-                    documents.c.source_filename,
-                    documents.c.owner_user_id,
-                    documents.c.visibility,
-                    sqlalchemy.func.count(chapters.c.id).label("chapter_count"),
+            rows = (
+                connection.execute(
+                    select(
+                        documents.c.document_title,
+                        documents.c.document_slug,
+                        documents.c.source_filename,
+                        documents.c.owner_user_id,
+                        documents.c.visibility,
+                        sqlalchemy.func.count(chapters.c.id).label("chapter_count"),
+                    )
+                    .select_from(
+                        documents.outerjoin(chapters, chapters.c.document_id == documents.c.id)
+                    )
+                    .where(self._tenant_visibility_filter(documents, user_id))
+                    .group_by(documents.c.id)
+                    .order_by(documents.c.document_title)
                 )
-                .select_from(documents.outerjoin(chapters, chapters.c.document_id == documents.c.id))
-                .where(self._tenant_visibility_filter(documents, user_id))
-                .group_by(documents.c.id)
-                .order_by(documents.c.document_title)
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         return [dict(row) for row in rows]
 
-    def resolve_document(self, document_title_or_slug: str, user_id: str | None = None) -> dict | None:
+    def resolve_document(
+        self, document_title_or_slug: str, user_id: str | None = None
+    ) -> dict | None:
         """Resolve one stored document row from either its human title or its slug."""
 
         documents = self.tables["documents"]
@@ -788,16 +832,20 @@ class DatabaseManager:
         with self.engine.begin() as connection:
             # Accept either the original title or the normalized slug so callers
             # do not need to care which representation they currently have.
-            row = connection.execute(
-                select(documents).where(
-                    (
-                        (documents.c.document_title == document_title_or_slug)
-                        | (documents.c.document_slug == document_title_or_slug)
-                        | (documents.c.document_slug == document_slug)
-                    ),
-                    self._tenant_visibility_filter(documents, user_id),
+            row = (
+                connection.execute(
+                    select(documents).where(
+                        (
+                            (documents.c.document_title == document_title_or_slug)
+                            | (documents.c.document_slug == document_title_or_slug)
+                            | (documents.c.document_slug == document_slug)
+                        ),
+                        self._tenant_visibility_filter(documents, user_id),
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
         return dict(row) if row is not None else None
 
@@ -856,10 +904,14 @@ class DatabaseManager:
             )
 
             if chapter_number:
-                section_query = section_query.where(chapters.c.chapter_number == str(chapter_number).strip())
+                section_query = section_query.where(
+                    chapters.c.chapter_number == str(chapter_number).strip()
+                )
 
             if normalized_section_numbers:
-                section_query = section_query.where(sections.c.section_number.in_(normalized_section_numbers))
+                section_query = section_query.where(
+                    sections.c.section_number.in_(normalized_section_numbers)
+                )
 
             section_rows = connection.execute(section_query).mappings().all()
 
@@ -867,16 +919,20 @@ class DatabaseManager:
             for section_row in section_rows:
                 # Subsections are fetched per section so the caller gets a ready-
                 # to-use nested payload without having to perform extra joins.
-                subsection_rows = connection.execute(
-                    select(
-                        subsections.c.subsection_number,
-                        subsections.c.subsection_summary,
-                        subsections.c.subsection_text,
-                        subsections.c.page_number,
+                subsection_rows = (
+                    connection.execute(
+                        select(
+                            subsections.c.subsection_number,
+                            subsections.c.subsection_summary,
+                            subsections.c.subsection_text,
+                            subsections.c.page_number,
+                        )
+                        .where(subsections.c.section_id == section_row["section_id"])
+                        .order_by(subsections.c.id)
                     )
-                    .where(subsections.c.section_id == section_row["section_id"])
-                    .order_by(subsections.c.id)
-                ).mappings().all()
+                    .mappings()
+                    .all()
+                )
 
                 payloads.append(
                     {
@@ -958,7 +1014,9 @@ class DatabaseManager:
 
             if normalized_subsection_numbers:
                 subsection_query = subsection_query.where(
-                    sqlalchemy.func.lower(subsections.c.subsection_number).in_(normalized_subsection_numbers)
+                    sqlalchemy.func.lower(subsections.c.subsection_number).in_(
+                        normalized_subsection_numbers
+                    )
                 )
 
             subsection_rows = connection.execute(subsection_query).mappings().all()
@@ -1003,7 +1061,9 @@ class DatabaseManager:
             if not search_terms:
                 return []
 
-        section_rows = self.find_sections(document_title_or_slug=document_title_or_slug, user_id=user_id)
+        section_rows = self.find_sections(
+            document_title_or_slug=document_title_or_slug, user_id=user_id
+        )
         scored_rows: list[dict] = []
 
         for section_row in section_rows:
@@ -1072,7 +1132,9 @@ class DatabaseManager:
         )
         return scored_rows[:limit]
 
-    def list_sections_for_chapter(self, document_title_or_slug: str, chapter_number: str) -> list[dict]:
+    def list_sections_for_chapter(
+        self, document_title_or_slug: str, chapter_number: str
+    ) -> list[dict]:
         """Return every section stored under one chapter number for a document."""
 
         return self.find_sections(
@@ -1082,7 +1144,9 @@ class DatabaseManager:
 
     @staticmethod
     def _tenant_visibility_filter(documents: Table, user_id: str | None):
-        public_filter = (documents.c.visibility == "public") | (documents.c.visibility == None)  # noqa: E711
+        public_filter = (documents.c.visibility == "public") | (
+            documents.c.visibility == None
+        )  # noqa: E711
         if user_id:
             return public_filter | (documents.c.owner_user_id == str(user_id))
         return public_filter
@@ -1176,9 +1240,7 @@ class DatabaseManager:
         """Return normalized lookup terms that are intrinsic to the document title."""
 
         return {
-            term
-            for term in re.findall(r"[a-z0-9]+", (raw_value or "").lower())
-            if len(term) > 2
+            term for term in re.findall(r"[a-z0-9]+", (raw_value or "").lower()) if len(term) > 2
         }
 
     @staticmethod

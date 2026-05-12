@@ -4,9 +4,8 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
-
 
 security_logger = logging.getLogger("civilai.security")
 
@@ -26,7 +25,9 @@ def is_production_environment(environment: str | None = None) -> bool:
 
 def require_production_secret(name: str, value: str | None) -> str:
     if is_production_environment() and not value:
-        raise RuntimeError(f"{name} must be set when ENVIRONMENT is production, staging, or server.")
+        raise RuntimeError(
+            f"{name} must be set when ENVIRONMENT is production, staging, or server."
+        )
     return value or ""
 
 
@@ -47,7 +48,7 @@ def sanitize_detail(detail: Any) -> Any:
 def audit_event(event: str, **fields: Any) -> None:
     payload = {
         "event": event,
-        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **{key: value for key, value in fields.items() if value is not None},
     }
     security_logger.info(json.dumps(payload, sort_keys=True, default=str))

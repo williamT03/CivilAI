@@ -6,7 +6,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, create_engine, insert, select, update
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    insert,
+    select,
+    update,
+)
 
 try:
     from backend.app.core.config import get_settings
@@ -111,7 +123,9 @@ class IngestionJobStore:
             values["result_json"] = json.dumps(result)
 
         with self.engine.begin() as connection:
-            connection.execute(update(ingestion_jobs).where(ingestion_jobs.c.id == job_id).values(**values))
+            connection.execute(
+                update(ingestion_jobs).where(ingestion_jobs.c.id == job_id).values(**values)
+            )
 
         return self.get_job(job_id)
 
@@ -125,7 +139,9 @@ class IngestionJobStore:
 
     def list_jobs(self, *, user_id: str | None = None, limit: int = 25) -> list[IngestionJob]:
         with self.engine.begin() as connection:
-            statement = select(ingestion_jobs).order_by(ingestion_jobs.c.created_at.desc()).limit(limit)
+            statement = (
+                select(ingestion_jobs).order_by(ingestion_jobs.c.created_at.desc()).limit(limit)
+            )
             if user_id is not None:
                 statement = statement.where(ingestion_jobs.c.user_id == user_id)
             rows = connection.execute(statement).mappings().all()
@@ -164,4 +180,3 @@ def get_ingestion_job_store() -> IngestionJobStore:
     if _job_store is None:
         _job_store = IngestionJobStore()
     return _job_store
-

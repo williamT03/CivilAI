@@ -1,0 +1,10 @@
+.git
+.venv
+.pytest_cache
+backend/Data
+downloads
+frontend/Website/civil-ai-web/node_modules
+frontend/Website/civil-ai-web/.next
+frontend/Website/civil-ai-web/out
+agents/reports
+*.log

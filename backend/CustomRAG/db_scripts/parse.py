@@ -14,8 +14,8 @@ import fitz
 
 # Reuse the normalized relational and vector storage layers built earlier.
 try:
-    from DB import DatabaseManager
     from chroma import ChromaManager, create_runtime_vector_manager
+    from DB import DatabaseManager
 except ImportError:  # pragma: no cover - fallback for direct script execution
     import sys
 
@@ -23,8 +23,8 @@ except ImportError:  # pragma: no cover - fallback for direct script execution
     if str(repo_root) not in sys.path:
         sys.path.append(str(repo_root))
 
-    from backend.CustomRAG.db_scripts.DB import DatabaseManager
     from backend.CustomRAG.db_scripts.chroma import ChromaManager, create_runtime_vector_manager
+    from backend.CustomRAG.db_scripts.DB import DatabaseManager
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,9 @@ class StructuredDocumentBuilder:
 
         subsection_text = self._merge_lines(self.current_subsection.pop("_body_lines", []))
         self.current_subsection["subsection_text"] = subsection_text
-        self.current_subsection["subsection_summary"] = self.summary_builder.summarize(subsection_text)
+        self.current_subsection["subsection_summary"] = self.summary_builder.summarize(
+            subsection_text
+        )
         existing_subsection = next(
             (
                 subsection
@@ -267,10 +269,16 @@ class StructuredDocumentBuilder:
         )
 
         if existing_subsection is not None:
-            if len(self.current_subsection["subsection_text"]) > len(existing_subsection["subsection_text"]):
+            if len(self.current_subsection["subsection_text"]) > len(
+                existing_subsection["subsection_text"]
+            ):
                 existing_subsection["subsection_text"] = self.current_subsection["subsection_text"]
-            if len(self.current_subsection["subsection_summary"]) > len(existing_subsection["subsection_summary"]):
-                existing_subsection["subsection_summary"] = self.current_subsection["subsection_summary"]
+            if len(self.current_subsection["subsection_summary"]) > len(
+                existing_subsection["subsection_summary"]
+            ):
+                existing_subsection["subsection_summary"] = self.current_subsection[
+                    "subsection_summary"
+                ]
         else:
             self.current_section["subsections"].append(self.current_subsection)
 
@@ -312,7 +320,9 @@ class StructuredDocumentBuilder:
         if existing_section is not None:
             if len(self.current_section["section_text"]) > len(existing_section["section_text"]):
                 existing_section["section_text"] = self.current_section["section_text"]
-            if len(self.current_section["section_summary"]) > len(existing_section["section_summary"]):
+            if len(self.current_section["section_summary"]) > len(
+                existing_section["section_summary"]
+            ):
                 existing_section["section_summary"] = self.current_section["section_summary"]
             if len(self.current_section["subsections"]) > len(existing_section["subsections"]):
                 existing_section["subsections"] = self.current_section["subsections"]
@@ -411,7 +421,9 @@ class ParserPipelineBuilder:
         self._chroma_manager = chroma_manager
         return self
 
-    def with_summary_builder(self, summary_builder: ExtractiveSummaryBuilder) -> "ParserPipelineBuilder":
+    def with_summary_builder(
+        self, summary_builder: ExtractiveSummaryBuilder
+    ) -> "ParserPipelineBuilder":
         self._summary_builder = summary_builder
         return self
 
@@ -423,7 +435,9 @@ class ParserPipelineBuilder:
         paths.chroma_dir.mkdir(parents=True, exist_ok=True)
 
         db_manager = self._db_manager or ParserComponentFactory.create_database_manager(paths)
-        chroma_manager = self._chroma_manager or ParserComponentFactory.create_chroma_manager(paths, db_manager)
+        chroma_manager = self._chroma_manager or ParserComponentFactory.create_chroma_manager(
+            paths, db_manager
+        )
         summary_builder = self._summary_builder or ExtractiveSummaryBuilder()
 
         return OrdinancePdfParser(
@@ -589,7 +603,9 @@ class OrdinancePdfParser:
         layout = self._detect_document_layout(document, first_section_candidate)
 
         # Section parsing starts on the first post-TOC page where a real section header appears.
-        content_start_page = self._find_first_content_page(document, first_section_candidate, layout)
+        content_start_page = self._find_first_content_page(
+            document, first_section_candidate, layout
+        )
 
         return DocumentParseProfile(
             document_title=document_title,
@@ -677,7 +693,9 @@ class OrdinancePdfParser:
             page = document[page_number - 1]
             page_text = page.get_text("text")
             single_column_lines = self._extract_ordered_lines(page, "single_column")
-            if self._page_should_be_skipped_for_layout(page_text) or self._page_is_section_overview(single_column_lines):
+            if self._page_should_be_skipped_for_layout(page_text) or self._page_is_section_overview(
+                single_column_lines
+            ):
                 continue
             layout_votes.append(self._classify_page_layout(page))
             if len(layout_votes) >= 8:
@@ -687,7 +705,9 @@ class OrdinancePdfParser:
             return "single_column"
 
         two_column_votes = sum(1 for vote in layout_votes if vote == "two_column")
-        return "two_column" if two_column_votes >= max(1, len(layout_votes) / 2) else "single_column"
+        return (
+            "two_column" if two_column_votes >= max(1, len(layout_votes) / 2) else "single_column"
+        )
 
     def _page_should_be_skipped_for_layout(self, page_text: str) -> bool:
         lower = (page_text or "").lower()
@@ -730,7 +750,9 @@ class OrdinancePdfParser:
             return "two_column"
         return "single_column"
 
-    def _find_first_content_page(self, document: fitz.Document, start_page: int, layout: str) -> int:
+    def _find_first_content_page(
+        self, document: fitz.Document, start_page: int, layout: str
+    ) -> int:
         # Start parsing from the first page that actually contains a section header.
         for page_number in range(start_page, len(document) + 1):
             lines = self._extract_ordered_lines(document[page_number - 1], layout)
@@ -740,7 +762,9 @@ class OrdinancePdfParser:
                 return page_number
         return max(start_page, 1)
 
-    def _extract_toc_chapters(self, document: fitz.Document, profile: DocumentParseProfile) -> list[dict]:
+    def _extract_toc_chapters(
+        self, document: fitz.Document, profile: DocumentParseProfile
+    ) -> list[dict]:
         # Extract chapters from the TOC so we preserve human chapter names even
         # before we parse any section bodies.
         if profile.toc_end_page < profile.toc_start_page:
@@ -965,7 +989,9 @@ class OrdinancePdfParser:
 
 def main() -> None:
     # Allow the parser to run against either one uploaded file or the whole PDF directory.
-    argument_parser = argparse.ArgumentParser(description="Parse ordinance PDFs into SQL, JSON, and Chroma.")
+    argument_parser = argparse.ArgumentParser(
+        description="Parse ordinance PDFs into SQL, JSON, and Chroma."
+    )
     argument_parser.add_argument(
         "--file",
         dest="file",

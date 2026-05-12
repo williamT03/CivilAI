@@ -37,8 +37,7 @@ export function AuthExperience({ initialMode }: AuthExperienceProps) {
   const [fullName, setFullName] = useState("");
   const [jurisdiction, setJurisdiction] = useState("");
 
-  const { isAuthenticated, isLoading: isAuthLoading, login, register, continueAsGuest } =
-    useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, login, register, continueAsGuest } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -189,8 +188,8 @@ export function AuthExperience({ initialMode }: AuthExperienceProps) {
                   <h1 className="auth-display">
                     {mode === "login" ? (
                       <>
-                        Return to the <span className="heading-accent">code trail</span> you
-                        already started.
+                        Return to the <span className="heading-accent">code trail</span> you already
+                        started.
                       </>
                     ) : (
                       <>
@@ -217,7 +216,11 @@ export function AuthExperience({ initialMode }: AuthExperienceProps) {
                     type="button"
                     role="tab"
                     aria-selected={mode === "login"}
-                    className={mode === "login" ? "auth-switch-link auth-switch-link-active" : "auth-switch-link"}
+                    className={
+                      mode === "login"
+                        ? "auth-switch-link auth-switch-link-active"
+                        : "auth-switch-link"
+                    }
                     onClick={() => {
                       setError("");
                       setMode("login");
@@ -229,7 +232,11 @@ export function AuthExperience({ initialMode }: AuthExperienceProps) {
                     type="button"
                     role="tab"
                     aria-selected={mode === "register"}
-                    className={mode === "register" ? "auth-switch-link auth-switch-link-active" : "auth-switch-link"}
+                    className={
+                      mode === "register"
+                        ? "auth-switch-link auth-switch-link-active"
+                        : "auth-switch-link"
+                    }
                     onClick={() => {
                       setError("");
                       setMode("register");
@@ -421,7 +428,9 @@ export function AuthExperience({ initialMode }: AuthExperienceProps) {
                         <button
                           type="submit"
                           className="button button-primary"
-                          disabled={isLoading || !email || !username || !password || !confirmPassword}
+                          disabled={
+                            isLoading || !email || !username || !password || !confirmPassword
+                          }
                         >
                           {isLoading ? "Creating workspace..." : "Create account"}
                         </button>

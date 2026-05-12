@@ -23,9 +23,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
           <div className="glass-card center-card">
             <span className="eyebrow">Civil AI</span>
             <h1 className="section-title">Restoring your session</h1>
-            <p className="section-copy">
-              Verifying your account and rebuilding the workspace.
-            </p>
+            <p className="section-copy">Verifying your account and rebuilding the workspace.</p>
             <div className="spinner-row">
               <span className="spinner" />
               <span className="muted-label">Loading secure workspace</span>

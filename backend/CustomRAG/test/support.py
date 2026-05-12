@@ -23,7 +23,7 @@ for path in (REPO_ROOT, BACKEND_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from backend.CustomRAG.db_scripts import DatabaseManager, ChromaManager
+from backend.CustomRAG.db_scripts import ChromaManager, DatabaseManager
 from backend.CustomRAG.tools.navigation_tools import StructuredRetrievalToolkit, StructuredToolPaths
 
 

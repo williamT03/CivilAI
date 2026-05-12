@@ -32,7 +32,9 @@ class FileStorage:
             self.local_directory = self.settings.backend_root.parent / self.local_directory
         self.local_directory.mkdir(parents=True, exist_ok=True)
 
-    def save_pdf_stream(self, stream: BinaryIO, *, filename: str, user_id: str | None = None) -> StoredFile:
+    def save_pdf_stream(
+        self, stream: BinaryIO, *, filename: str, user_id: str | None = None
+    ) -> StoredFile:
         storage_key = self.build_storage_key(filename, user_id=user_id)
         local_path = self.local_directory / filename
         checksum = hashlib.sha256()
@@ -79,7 +81,9 @@ class FileStorage:
             ExtraArgs={"ContentType": stored_file.content_type},
         )
 
-    def create_presigned_upload_url(self, *, filename: str, user_id: str, expires_in: int = 900) -> dict:
+    def create_presigned_upload_url(
+        self, *, filename: str, user_id: str, expires_in: int = 900
+    ) -> dict:
         if self.settings.storage_backend.lower() not in {"s3", "r2"}:
             raise RuntimeError("Signed uploads require STORAGE_BACKEND=s3 or STORAGE_BACKEND=r2.")
         if not self.settings.s3_bucket_name:

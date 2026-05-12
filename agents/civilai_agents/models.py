@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -29,6 +30,10 @@ class AgentContext:
     report_dir: str
     skip_frontend_build: bool = False
     skip_dependency_audit: bool = False
+
+    @property
+    def report_path(self) -> Path:
+        return Path(self.report_dir)
 
 
 @dataclass(frozen=True)

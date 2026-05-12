@@ -145,7 +145,7 @@ function AccountContent() {
 
   const stats = useMemo(
     () => [
-      { label: "Username", value: isGuest ? "guest" : user?.username ?? "--" },
+      { label: "Username", value: isGuest ? "guest" : (user?.username ?? "--") },
       { label: "Session", value: isGuest ? "Guest workspace" : "Registered account" },
       { label: "Saved chats", value: isGuest ? "Local only" : String(savedChats.length) },
       { label: "Uploaded docs", value: isGuest ? "Guest upload" : String(uploads.length) },
@@ -190,8 +190,8 @@ function AccountContent() {
         </div>
         <p className="section-copy page-heading-copy">
           Your account turns CivilAI from a quick lookup tool into a reusable research desk:
-          preferred jurisdictions stay ready, ordinance uploads remain visible, and saved chats
-          keep the reasoning behind project decisions from disappearing.
+          preferred jurisdictions stay ready, ordinance uploads remain visible, and saved chats keep
+          the reasoning behind project decisions from disappearing.
         </p>
       </Reveal>
 
@@ -235,7 +235,7 @@ function AccountContent() {
                 id="email"
                 className="field-input zen-field"
                 type="email"
-                value={isGuest ? "Guest session" : user?.email ?? ""}
+                value={isGuest ? "Guest session" : (user?.email ?? "")}
                 disabled
               />
             </div>
@@ -282,7 +282,9 @@ function AccountContent() {
 
           <div className="micro-ledger">
             <span>Joined: {formatDate(user?.created_at)}</span>
-            <span>Last login: {isGuest ? "This browser session" : formatDate(user?.last_login)}</span>
+            <span>
+              Last login: {isGuest ? "This browser session" : formatDate(user?.last_login)}
+            </span>
           </div>
         </Reveal>
 
@@ -302,7 +304,8 @@ function AccountContent() {
                       <div>
                         <strong>{upload.document_title || upload.filename}</strong>
                         <p className="field-hint">
-                          {upload.section_count ?? 0} sections · {upload.subsection_count ?? 0} subsections
+                          {upload.section_count ?? 0} sections · {upload.subsection_count ?? 0}{" "}
+                          subsections
                         </p>
                       </div>
                       <span className="field-hint">{formatDate(upload.uploaded_at)}</span>

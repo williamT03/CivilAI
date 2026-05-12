@@ -7,7 +7,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Float, Integer, MetaData, String, Table, Text, create_engine, func, insert, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    func,
+    insert,
+    select,
+)
 
 try:
     from backend.app.core.config import get_settings
@@ -106,7 +119,9 @@ class UsageTracker:
         except Exception as exc:  # Usage logging must never block answers.
             logger.warning("Could not record AI usage event: %s", exc)
 
-    def record_provider_event(self, request_id: str, provider: str, model: str, event: str, message: str | None = None) -> None:
+    def record_provider_event(
+        self, request_id: str, provider: str, model: str, event: str, message: str | None = None
+    ) -> None:
         try:
             with self.engine.begin() as connection:
                 connection.execute(
@@ -172,7 +187,9 @@ class UsageTracker:
 
     @staticmethod
     def estimate_cost(event: UsageEvent) -> float:
-        prefix = f"AI_PRICE_{event.provider}_{event.model}".upper().replace("-", "_").replace(".", "_")
+        prefix = (
+            f"AI_PRICE_{event.provider}_{event.model}".upper().replace("-", "_").replace(".", "_")
+        )
         input_per_m = float(os.getenv(f"{prefix}_INPUT_PER_M", "0") or 0)
         output_per_m = float(os.getenv(f"{prefix}_OUTPUT_PER_M", "0") or 0)
         embedding_per_m = float(os.getenv(f"{prefix}_EMBEDDING_PER_M", "0") or 0)

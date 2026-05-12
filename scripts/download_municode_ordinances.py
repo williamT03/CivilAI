@@ -14,7 +14,6 @@ from urllib.parse import unquote_plus, urlparse
 
 import requests
 
-
 LIBRARY_BASE_URL = "https://library.municode.com"
 API_BASE_URL = f"{LIBRARY_BASE_URL}/api"
 DEFAULT_USER_AGENT = "CivilAI Municode ordinance downloader"
@@ -69,11 +68,7 @@ class MunicodeDownloader:
     def get_state_id(self) -> int:
         states = self._get_json("States")
         state_row = next(
-            (
-                row
-                for row in states
-                if str(row.get("StateAbbreviation", "")).lower() == self.state
-            ),
+            (row for row in states if str(row.get("StateAbbreviation", "")).lower() == self.state),
             None,
         )
         if not state_row:
@@ -84,7 +79,9 @@ class MunicodeDownloader:
         clients = self._get_json(f"Clients/stateId/{state_id}")
         return sorted(clients, key=lambda item: str(item.get("ClientName", "")).lower())
 
-    def list_pdf_targets(self, clients: list[dict[str, Any]], *, limit: int | None = None) -> list[CodePdfTarget]:
+    def list_pdf_targets(
+        self, clients: list[dict[str, Any]], *, limit: int | None = None
+    ) -> list[CodePdfTarget]:
         targets: list[CodePdfTarget] = []
         selected_clients = clients[:limit] if limit else clients
         for index, client in enumerate(selected_clients, start=1):
@@ -119,7 +116,9 @@ class MunicodeDownloader:
                         latest_updated_date=code.get("latestUpdatedDate"),
                         library_url=self.build_library_url(client_name, product_name),
                         pdf_url=pdf_url,
-                        filename=self.build_filename(client_name, product_name, int(publication_id), pdf_url),
+                        filename=self.build_filename(
+                            client_name, product_name, int(publication_id), pdf_url
+                        ),
                     )
                 )
                 self._sleep()
@@ -128,7 +127,9 @@ class MunicodeDownloader:
     def get_pdf_url(self, publication_id: int) -> str:
         url = self._get_json(f"PublicationPdfDownload/{publication_id}")
         if not isinstance(url, str) or not url.lower().startswith("http"):
-            raise RuntimeError(f"Municode did not return a PDF URL for publication {publication_id}.")
+            raise RuntimeError(
+                f"Municode did not return a PDF URL for publication {publication_id}."
+            )
         return url
 
     def download_pdf(self, target: CodePdfTarget, *, skip_existing: bool = True) -> Path:
@@ -142,8 +143,12 @@ class MunicodeDownloader:
         with self._request("GET", target.pdf_url, stream=True) as response:
             response.raise_for_status()
             content_type = response.headers.get("content-type", "")
-            if "pdf" not in content_type.lower() and not target.pdf_url.lower().split("?")[0].endswith(".pdf"):
-                raise RuntimeError(f"Expected PDF for {target.client_name}, got content-type {content_type!r}.")
+            if "pdf" not in content_type.lower() and not target.pdf_url.lower().split("?")[
+                0
+            ].endswith(".pdf"):
+                raise RuntimeError(
+                    f"Expected PDF for {target.client_name}, got content-type {content_type!r}."
+                )
 
             temporary_path = destination.with_suffix(".pdf.part")
             with temporary_path.open("wb") as file_handle:
@@ -156,7 +161,9 @@ class MunicodeDownloader:
         self._sleep()
         return destination
 
-    def write_manifest(self, targets: list[CodePdfTarget], downloaded_paths: dict[int, Path]) -> Path:
+    def write_manifest(
+        self, targets: list[CodePdfTarget], downloaded_paths: dict[int, Path]
+    ) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = self.output_dir / "manifest.csv"
         with manifest_path.open("w", newline="", encoding="utf-8") as file_handle:
@@ -194,7 +201,9 @@ class MunicodeDownloader:
                 )
         return manifest_path
 
-    def write_json_manifest(self, targets: list[CodePdfTarget], downloaded_paths: dict[int, Path]) -> Path:
+    def write_json_manifest(
+        self, targets: list[CodePdfTarget], downloaded_paths: dict[int, Path]
+    ) -> Path:
         manifest_path = self.output_dir / "manifest.json"
         payload = []
         for target in targets:
@@ -216,9 +225,13 @@ class MunicodeDownloader:
         manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return manifest_path
 
-    def create_zip(self, zip_path: Path, downloaded_paths: dict[int, Path], manifest_paths: list[Path]) -> Path:
+    def create_zip(
+        self, zip_path: Path, downloaded_paths: dict[int, Path], manifest_paths: list[Path]
+    ) -> Path:
         zip_path.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        with zipfile.ZipFile(
+            zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+        ) as archive:
             for manifest_path in manifest_paths:
                 archive.write(manifest_path, manifest_path.name)
             for path in sorted(downloaded_paths.values(), key=lambda item: item.name.lower()):
@@ -257,7 +270,9 @@ class MunicodeDownloader:
         return f"{LIBRARY_BASE_URL}/fl/{client_slug}/codes/{product_slug}"
 
     @staticmethod
-    def build_filename(client_name: str, product_name: str, publication_id: int, pdf_url: str) -> str:
+    def build_filename(
+        client_name: str, product_name: str, publication_id: int, pdf_url: str
+    ) -> str:
         filename = filename_from_content_disposition_url(pdf_url)
         if filename:
             return safe_filename(filename)
@@ -290,7 +305,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download official Municode ordinance/code PDFs for every municipality in one state library.",
     )
-    parser.add_argument("--state", default="fl", help="Municode state abbreviation to crawl. Default: fl")
+    parser.add_argument(
+        "--state", default="fl", help="Municode state abbreviation to crawl. Default: fl"
+    )
     parser.add_argument(
         "--output-dir",
         default="downloads/municode_fl",
@@ -301,13 +318,27 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Zip filename. Default: municode_<state>_official_pdfs.zip",
     )
-    parser.add_argument("--delay", type=float, default=0.35, help="Delay between API/download requests.")
+    parser.add_argument(
+        "--delay", type=float, default=0.35, help="Delay between API/download requests."
+    )
     parser.add_argument("--timeout", type=float, default=90, help="HTTP timeout in seconds.")
-    parser.add_argument("--retries", type=int, default=3, help="Retries for transient HTTP/network failures.")
-    parser.add_argument("--limit", type=int, default=None, help="Optional client limit for testing.")
-    parser.add_argument("--dry-run", action="store_true", help="Discover PDF targets without downloading files.")
-    parser.add_argument("--overwrite", action="store_true", help="Re-download PDFs that already exist.")
-    parser.add_argument("--no-zip", action="store_true", help="Download files and write manifests without creating a zip.")
+    parser.add_argument(
+        "--retries", type=int, default=3, help="Retries for transient HTTP/network failures."
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Optional client limit for testing."
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Discover PDF targets without downloading files."
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Re-download PDFs that already exist."
+    )
+    parser.add_argument(
+        "--no-zip",
+        action="store_true",
+        help="Download files and write manifests without creating a zip.",
+    )
     return parser.parse_args()
 
 
@@ -338,7 +369,10 @@ def main() -> int:
     downloaded_paths: dict[int, Path] = {}
     if not args.dry_run:
         for index, target in enumerate(targets, start=1):
-            print(f"[{index}/{len(targets)}] Downloading {target.client_name} - {target.product_name}", flush=True)
+            print(
+                f"[{index}/{len(targets)}] Downloading {target.client_name} - {target.product_name}",
+                flush=True,
+            )
             try:
                 downloaded_paths[target.publication_id] = downloader.download_pdf(
                     target,

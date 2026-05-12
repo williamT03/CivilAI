@@ -18,11 +18,23 @@ class VectorHit:
 
 
 class VectorStore(Protocol):
-    def upsert(self, collection: str, ids: list[str], texts: list[str], embeddings: list[list[float]], metadatas: list[dict]) -> None:
-        ...
+    def upsert(
+        self,
+        collection: str,
+        ids: list[str],
+        texts: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict],
+    ) -> None: ...
 
-    def query(self, collection: str, embedding: list[float], *, limit: int = 5, filters: dict | None = None) -> list[VectorHit]:
-        ...
+    def query(
+        self,
+        collection: str,
+        embedding: list[float],
+        *,
+        limit: int = 5,
+        filters: dict | None = None,
+    ) -> list[VectorHit]: ...
 
 
 class QdrantVectorStore:
@@ -34,7 +46,14 @@ class QdrantVectorStore:
         settings = get_settings()
         self.client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
-    def upsert(self, collection: str, ids: list[str], texts: list[str], embeddings: list[list[float]], metadatas: list[dict]) -> None:
+    def upsert(
+        self,
+        collection: str,
+        ids: list[str],
+        texts: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict],
+    ) -> None:
         from qdrant_client.models import PointStruct
 
         points = [
@@ -47,7 +66,14 @@ class QdrantVectorStore:
         ]
         self.client.upsert(collection_name=collection, points=points)
 
-    def query(self, collection: str, embedding: list[float], *, limit: int = 5, filters: dict | None = None) -> list[VectorHit]:
+    def query(
+        self,
+        collection: str,
+        embedding: list[float],
+        *,
+        limit: int = 5,
+        filters: dict | None = None,
+    ) -> list[VectorHit]:
         response = self.client.query_points(
             collection_name=collection,
             query=embedding,
@@ -59,9 +85,10 @@ class QdrantVectorStore:
             VectorHit(
                 id=str(point.id),
                 text=(point.payload or {}).get("text", ""),
-                metadata={key: value for key, value in (point.payload or {}).items() if key != "text"},
+                metadata={
+                    key: value for key, value in (point.payload or {}).items() if key != "text"
+                },
                 score=float(point.score or 0),
             )
             for point in response.points
         ]
-

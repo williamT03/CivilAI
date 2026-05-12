@@ -6,14 +6,6 @@ optionally. That keeps DB/Chroma consumers working even in lightweight
 interpreters where parser-only dependencies are not installed.
 """
 
-from .DB import (
-    ChapterDefinition,
-    DatabaseManager,
-    DocumentDefinition,
-    DocumentSchemaBuilder,
-    SectionDefinition,
-    SubsectionDefinition,
-)
 from .chroma import (
     ChromaCollectionFactory,
     ChromaDocumentBuilder,
@@ -22,6 +14,14 @@ from .chroma import (
     ChromaNode,
     SentenceTransformerEmbeddingProvider,
     create_runtime_chroma_builder,
+)
+from .DB import (
+    ChapterDefinition,
+    DatabaseManager,
+    DocumentDefinition,
+    DocumentSchemaBuilder,
+    SectionDefinition,
+    SubsectionDefinition,
 )
 
 try:
@@ -34,6 +34,7 @@ try:
         ParserPipelineBuilder,
         StructuredDocumentBuilder,
     )
+
     PARSER_IMPORT_ERROR = None
 except Exception as error:  # pragma: no cover - parser deps can be optional in some runtimes
     DocumentParseProfile = None

@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = '''
+/(
+  \.git
+  | \.venv
+  | \.pytest_cache
+  | backend/Data
+  | downloads
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["backend", "agents", "CustomRAG", "app"]
+skip = [".venv", ".git", ".pytest_cache", "backend/Data", "downloads"]

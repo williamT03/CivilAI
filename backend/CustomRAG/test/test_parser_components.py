@@ -17,6 +17,7 @@ try:
         ParserComponentFactory,
         StructuredDocumentBuilder,
     )
+
     PARSER_IMPORT_ERROR = None
 except Exception as error:  # pragma: no cover - depends on local parser runtime
     ExtractiveSummaryBuilder = None
@@ -25,7 +26,9 @@ except Exception as error:  # pragma: no cover - depends on local parser runtime
     PARSER_IMPORT_ERROR = error
 
 
-@unittest.skipIf(PARSER_IMPORT_ERROR is not None, f"Parser dependencies unavailable: {PARSER_IMPORT_ERROR}")
+@unittest.skipIf(
+    PARSER_IMPORT_ERROR is not None, f"Parser dependencies unavailable: {PARSER_IMPORT_ERROR}"
+)
 class TestParserComponents(unittest.TestCase):
     """Exercise the builder and summary logic that shapes parser output."""
 

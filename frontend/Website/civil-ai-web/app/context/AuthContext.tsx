@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { AUTH_API_BASE } from "../lib/apiConfig";
 
@@ -127,15 +120,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const persistTokens = useCallback((nextAccessToken: string | null, nextRefreshToken: string | null) => {
-    setToken(nextAccessToken);
-    setRefreshToken(nextRefreshToken);
-    writeStoredValue(ACCESS_TOKEN_KEY, nextAccessToken);
-    writeStoredValue(REFRESH_TOKEN_KEY, nextRefreshToken);
-    if (nextAccessToken) {
-      writeStoredValue(GUEST_SESSION_KEY, null);
-    }
-  }, []);
+  const persistTokens = useCallback(
+    (nextAccessToken: string | null, nextRefreshToken: string | null) => {
+      setToken(nextAccessToken);
+      setRefreshToken(nextRefreshToken);
+      writeStoredValue(ACCESS_TOKEN_KEY, nextAccessToken);
+      writeStoredValue(REFRESH_TOKEN_KEY, nextRefreshToken);
+      if (nextAccessToken) {
+        writeStoredValue(GUEST_SESSION_KEY, null);
+      }
+    },
+    [],
+  );
 
   const persistGuestUser = useCallback((nextGuestUser: User | null) => {
     if (nextGuestUser) {
@@ -152,37 +148,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistGuestUser(null);
   }, [persistGuestUser, persistTokens]);
 
-  const refreshAccessToken = useCallback(async (currentRefreshToken: string): Promise<TokenResponse> => {
-    const response = await fetch(
-      `${AUTH_API_BASE}/refresh?refresh_token=${encodeURIComponent(currentRefreshToken)}`,
-      {
-        method: "POST",
-      },
-    );
-    const tokens = await parseResponse<TokenResponse>(response);
-    persistTokens(tokens.access_token, tokens.refresh_token);
-    return tokens;
-  }, [persistTokens]);
+  const refreshAccessToken = useCallback(
+    async (currentRefreshToken: string): Promise<TokenResponse> => {
+      const response = await fetch(
+        `${AUTH_API_BASE}/refresh?refresh_token=${encodeURIComponent(currentRefreshToken)}`,
+        {
+          method: "POST",
+        },
+      );
+      const tokens = await parseResponse<TokenResponse>(response);
+      persistTokens(tokens.access_token, tokens.refresh_token);
+      return tokens;
+    },
+    [persistTokens],
+  );
 
-  const fetchCurrentUser = useCallback(async function loadCurrentUser(
-    accessToken: string,
-    currentRefreshToken: string | null,
-  ): Promise<User | null> {
-    const response = await fetch(`${AUTH_API_BASE}/me`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+  const fetchCurrentUser = useCallback(
+    async function loadCurrentUser(
+      accessToken: string,
+      currentRefreshToken: string | null,
+    ): Promise<User | null> {
+      const response = await fetch(`${AUTH_API_BASE}/me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
-    if (response.status === 401 && currentRefreshToken) {
-      const refreshed = await refreshAccessToken(currentRefreshToken);
-      return loadCurrentUser(refreshed.access_token, refreshed.refresh_token);
-    }
+      if (response.status === 401 && currentRefreshToken) {
+        const refreshed = await refreshAccessToken(currentRefreshToken);
+        return loadCurrentUser(refreshed.access_token, refreshed.refresh_token);
+      }
 
-    const nextUser = await parseResponse<User>(response);
-    setUser(nextUser);
-    return nextUser;
-  }, [refreshAccessToken]);
+      const nextUser = await parseResponse<User>(response);
+      setUser(nextUser);
+      return nextUser;
+    },
+    [refreshAccessToken],
+  );
 
   async function refreshUser(): Promise<User | null> {
     if (user?.is_guest) {
@@ -324,8 +326,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user?.is_guest) {
       const updatedGuestUser: User = {
         ...user,
-        full_name: payload.full_name !== undefined ? payload.full_name || "Guest User" : user.full_name,
-        jurisdiction: payload.jurisdiction !== undefined ? payload.jurisdiction || null : user.jurisdiction,
+        full_name:
+          payload.full_name !== undefined ? payload.full_name || "Guest User" : user.full_name,
+        jurisdiction:
+          payload.jurisdiction !== undefined ? payload.jurisdiction || null : user.jurisdiction,
         is_guest: true,
       };
       setUser(updatedGuestUser);

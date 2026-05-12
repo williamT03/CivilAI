@@ -26,6 +26,7 @@ The harness follows a small template-method pattern:
 1. Each agent extends `BaseAgent`.
 2. Each agent returns a list of `CheckResult` objects.
 3. `runner.py` handles selection, execution, console output, and JSON reports.
+4. `AgentRunPlanBuilder` resolves CLI inputs into a concrete run plan.
 
 This keeps new agents easy to add without changing the runner.
 

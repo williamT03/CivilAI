@@ -53,22 +53,41 @@ class LLMProvider(Protocol):
     provider_name: str
     model: str
 
-    def generate(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> AIResponse:
-        ...
+    def generate(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> AIResponse: ...
 
-    def stream(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> Iterator[str]:
-        ...
+    def stream(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> Iterator[str]: ...
 
 
 class EmbeddingProvider(Protocol):
     provider_name: str
     embedding_model: str
 
-    def embed(self, text: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> list[float]:
-        ...
+    def embed(
+        self, text: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None
+    ) -> list[float]: ...
 
-    def embed_batch(self, texts: list[str], *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> EmbeddingResponse:
-        ...
+    def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> EmbeddingResponse: ...
 
 
 class ProviderUnavailable(RuntimeError):
@@ -101,7 +120,14 @@ class OpenAICompatibleProvider:
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
-    def generate(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> AIResponse:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> AIResponse:
         if not self.is_configured():
             raise ProviderUnavailable(f"{self.provider_name} API key is not configured.")
 
@@ -144,7 +170,14 @@ class OpenAICompatibleProvider:
         )
         return ai_response
 
-    def stream(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> Iterator[str]:
         if not self.is_configured():
             raise ProviderUnavailable(f"{self.provider_name} API key is not configured.")
 
@@ -190,10 +223,21 @@ class OpenAICompatibleProvider:
             )
         )
 
-    def embed(self, text: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> list[float]:
-        return self.embed_batch([text], request_id=request_id, user_id=user_id, endpoint=endpoint).embeddings[0]
+    def embed(
+        self, text: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None
+    ) -> list[float]:
+        return self.embed_batch(
+            [text], request_id=request_id, user_id=user_id, endpoint=endpoint
+        ).embeddings[0]
 
-    def embed_batch(self, texts: list[str], *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> EmbeddingResponse:
+    def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> EmbeddingResponse:
         if not self.is_configured():
             raise ProviderUnavailable(f"{self.provider_name} API key is not configured.")
         if not texts:
@@ -292,7 +336,14 @@ class OllamaProvider:
                 f"'{self.model}' at {self.base_url}: {detail or response.reason}"
             ) from exc
 
-    def generate(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> AIResponse:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> AIResponse:
         start = time.perf_counter()
         response = requests.post(
             f"{self.base_url}/api/generate",
@@ -334,7 +385,14 @@ class OllamaProvider:
         )
         return result
 
-    def stream(self, prompt: str, *, request_id: str, user_id: str | None = None, endpoint: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> Iterator[str]:
         with requests.post(
             f"{self.base_url}/api/generate",
             json={
@@ -432,12 +490,29 @@ class AIProviderRouter:
                 )
         raise RuntimeError(f"All configured AI providers failed: {last_error}")
 
-    def stream(self, prompt: str, *, purpose: str = "answer", request_id: str | None = None, user_id: str | None = None, endpoint: str | None = None) -> Iterator[str]:
+    def stream(
+        self,
+        prompt: str,
+        *,
+        purpose: str = "answer",
+        request_id: str | None = None,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> Iterator[str]:
         provider_name = self.settings.provider_order(purpose)[0]
         provider = self.providers[provider_name]
-        return provider.stream(prompt, request_id=request_id or str(uuid.uuid4()), user_id=user_id, endpoint=endpoint)
+        return provider.stream(
+            prompt, request_id=request_id or str(uuid.uuid4()), user_id=user_id, endpoint=endpoint
+        )
 
-    def embed_batch(self, texts: list[str], *, request_id: str | None = None, user_id: str | None = None, endpoint: str | None = None) -> EmbeddingResponse:
+    def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        request_id: str | None = None,
+        user_id: str | None = None,
+        endpoint: str | None = None,
+    ) -> EmbeddingResponse:
         resolved_request_id = request_id or str(uuid.uuid4())
         last_error: Exception | None = None
         for provider_name in self.settings.provider_order("embedding"):
@@ -445,7 +520,9 @@ class AIProviderRouter:
             if provider is None or not hasattr(provider, "embed_batch"):
                 continue
             try:
-                return provider.embed_batch(texts, request_id=resolved_request_id, user_id=user_id, endpoint=endpoint)
+                return provider.embed_batch(
+                    texts, request_id=resolved_request_id, user_id=user_id, endpoint=endpoint
+                )
             except Exception as exc:
                 last_error = exc
                 get_usage_tracker().record_provider_event(

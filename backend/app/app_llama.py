@@ -1,14 +1,16 @@
+import os
+import sys
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from llama_index.core import StorageContext, load_index_from_storage
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
-from LlamaIndexRAG.config import embed_model, llm, STORAGE_DIR
+from LlamaIndexRAG.config import STORAGE_DIR, embed_model, llm
 
 JURISDICTION_ALIASES = {
     "cooper city": "Cooper City, FL",
@@ -23,6 +25,7 @@ def resolve_jurisdiction(name: str | None) -> str | None:
         return None
     key = name.lower().strip()
     return JURISDICTION_ALIASES.get(key, name)
+
 
 app = FastAPI()
 
@@ -57,7 +60,12 @@ def load_index_resources(force: bool = False):
     stamp = _current_index_stamp()
     if stamp is None:
         raise FileNotFoundError("LlamaIndex storage is missing. Build the index first.")
-    if not force and _INDEX_STAMP == stamp and index is not None and default_query_engine is not None:
+    if (
+        not force
+        and _INDEX_STAMP == stamp
+        and index is not None
+        and default_query_engine is not None
+    ):
         return
 
     storage_context = StorageContext.from_defaults(persist_dir=STORAGE_DIR)
@@ -69,8 +77,8 @@ def load_index_resources(force: bool = False):
     )
     _INDEX_STAMP = stamp
 
-QA_PROMPT = PromptTemplate(
-    """You are a civil engineering assistant specialized in municipal codes.
+
+QA_PROMPT = PromptTemplate("""You are a civil engineering assistant specialized in municipal codes.
 
 Use the provided context to answer the question accurately.
 
@@ -86,8 +94,7 @@ Question:
 {query_str}
 
 Answer:
-"""
-)
+""")
 
 load_index_resources(force=True)
 
@@ -102,9 +109,7 @@ def query(
     if resolved:
         retriever = index.as_retriever(
             similarity_top_k=5,
-            filters=MetadataFilters(
-                filters=[MetadataFilter(key="jurisdiction", value=resolved)]
-            ),
+            filters=MetadataFilters(filters=[MetadataFilter(key="jurisdiction", value=resolved)]),
         )
         query_engine = RetrieverQueryEngine.from_args(
             retriever,

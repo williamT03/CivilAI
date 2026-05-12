@@ -10,19 +10,19 @@ from typing import Sequence
 
 # Reuse the normalized SQL and Chroma layers that were built for the new stack.
 try:
-    from ..db_scripts.DB import DatabaseManager
     from ..db_scripts.chroma import (
         ChromaCollectionFactory,
         ChromaManager,
         create_runtime_vector_manager,
     )
+    from ..db_scripts.DB import DatabaseManager
 except ImportError:
-    from CustomRAG.db_scripts.DB import DatabaseManager
     from CustomRAG.db_scripts.chroma import (
         ChromaCollectionFactory,
         ChromaManager,
         create_runtime_vector_manager,
     )
+    from CustomRAG.db_scripts.DB import DatabaseManager
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,9 @@ class StructuredSummaryBuilder:
 
     def summarize_many(self, text_blocks: Sequence[str], max_words: int = 72) -> str:
         # Join multiple exact section bodies into one summary scope.
-        combined = " ".join(self._normalize_text(text) for text in text_blocks if self._normalize_text(text))
+        combined = " ".join(
+            self._normalize_text(text) for text in text_blocks if self._normalize_text(text)
+        )
         return self.summarize(combined, max_words=max_words)
 
     def _normalize_text(self, text: str) -> str:
@@ -136,7 +138,9 @@ class NavigationMapBuilder:
                     "sections": sections_payload,
                 }
 
-            aliases = sorted(self._build_aliases(document_title=document_title, document_slug=document_slug))
+            aliases = sorted(
+                self._build_aliases(document_title=document_title, document_slug=document_slug)
+            )
             navigation_map["documents"][document_slug] = {
                 "document_title": document_title,
                 "document_slug": document_slug,
@@ -190,7 +194,9 @@ class NavigationMapBuilder:
 
         # Single-word aliases are only useful when the name is unique, but they
         # are still stored here because the resolver applies scoring afterward.
-        words = [word for word in re.findall(r"[A-Za-z0-9]+", trimmed_title.lower()) if len(word) > 2]
+        words = [
+            word for word in re.findall(r"[A-Za-z0-9]+", trimmed_title.lower()) if len(word) > 2
+        ]
         if words:
             aliases.add(self._normalize_lookup_value(words[0]))
 
@@ -230,7 +236,9 @@ class StructuredToolFactory:
         return DatabaseManager(db_url=f"sqlite:///{paths.db_path.as_posix()}")
 
     @staticmethod
-    def create_chroma_manager(paths: StructuredToolPaths, db_manager: DatabaseManager) -> ChromaManager:
+    def create_chroma_manager(
+        paths: StructuredToolPaths, db_manager: DatabaseManager
+    ) -> ChromaManager:
         return create_runtime_vector_manager(
             persist_directory=paths.chroma_dir,
             db_manager=db_manager,
@@ -329,7 +337,13 @@ class StructuredRetrievalToolkit:
         re.IGNORECASE,
     )
     DISTRICT_ALIASES = {
-        "CG": ("commercial general", "general commercial", "commercial district", "cg district", "cg zoning"),
+        "CG": (
+            "commercial general",
+            "general commercial",
+            "commercial district",
+            "cg district",
+            "cg zoning",
+        ),
         "CN": ("neighborhood commercial", "commercial neighborhood", "cn district", "cn zoning"),
         "CH": ("heavy commercial", "highway commercial", "ch district", "ch zoning"),
         "CL": ("limited commercial", "light commercial", "cl district", "cl zoning"),
@@ -423,7 +437,9 @@ class StructuredRetrievalToolkit:
 
         hierarchies: list[dict] = []
         for document in self.db_manager.list_documents(user_id=user_id):
-            hierarchy = self.db_manager.fetch_document_hierarchy(document["document_slug"], user_id=user_id)
+            hierarchy = self.db_manager.fetch_document_hierarchy(
+                document["document_slug"], user_id=user_id
+            )
             if hierarchy is not None:
                 hierarchies.append(hierarchy)
 
@@ -451,7 +467,9 @@ class StructuredRetrievalToolkit:
             )
         return sorted(jurisdictions, key=lambda item: item["name"].lower())
 
-    def resolve_document_slug(self, user_text: str | None, user_id: str | None = None) -> str | None:
+    def resolve_document_slug(
+        self, user_text: str | None, user_id: str | None = None
+    ) -> str | None:
         """Resolve a user-provided jurisdiction string or query text to one document slug."""
 
         navigation_map = self.get_navigation_map(refresh=True, user_id=user_id)
@@ -471,19 +489,26 @@ class StructuredRetrievalToolkit:
         # specific matches beat vague single-word overlaps.
         scored_candidates: list[tuple[int, str]] = []
         for document_slug, document in documents.items():
-            candidate_strings = [document["document_title"], document_slug.replace("_", " ")] + list(
-                document.get("aliases", [])
-            )
+            candidate_strings = [
+                document["document_title"],
+                document_slug.replace("_", " "),
+            ] + list(document.get("aliases", []))
             best_score = 0
             for candidate in candidate_strings:
                 normalized_candidate = self._normalize_lookup_value(candidate)
                 if not normalized_candidate:
                     continue
-                owner_boost = 20 if user_id and str(document.get("owner_user_id") or "") == str(user_id) else 0
+                owner_boost = (
+                    20
+                    if user_id and str(document.get("owner_user_id") or "") == str(user_id)
+                    else 0
+                )
                 if normalized_input == normalized_candidate:
                     best_score = max(best_score, 100 + owner_boost)
                 elif normalized_candidate in normalized_input:
-                    best_score = max(best_score, 80 + min(len(normalized_candidate), 15) + owner_boost)
+                    best_score = max(
+                        best_score, 80 + min(len(normalized_candidate), 15) + owner_boost
+                    )
                 elif normalized_input in normalized_candidate:
                     best_score = max(best_score, 65 + min(len(normalized_input), 15) + owner_boost)
             if best_score > 0:
@@ -513,7 +538,9 @@ class StructuredRetrievalToolkit:
         seen: set[tuple[str, str]] = set()
         subsection_filters: list[dict] = []
 
-        for section_token, subsection_token in self.SUBSECTION_REFERENCE_PATTERN.findall(query or ""):
+        for section_token, subsection_token in self.SUBSECTION_REFERENCE_PATTERN.findall(
+            query or ""
+        ):
             section_number = f"Sec. {section_token.strip()}"
             subsection_number = f"({subsection_token.strip().lower()})"
             key = (section_number.lower(), subsection_number.lower())
@@ -533,7 +560,9 @@ class StructuredRetrievalToolkit:
         """Detect whether the user is asking for a summary-style response."""
 
         lowered = (query or "").lower()
-        return any(keyword in lowered for keyword in ("summarize", "summary", "overview", "synopsis"))
+        return any(
+            keyword in lowered for keyword in ("summarize", "summary", "overview", "synopsis")
+        )
 
     def summarize_sections(
         self,
@@ -543,7 +572,9 @@ class StructuredRetrievalToolkit:
     ) -> dict | None:
         """Summarize one or more exact sections from the structured database."""
 
-        section_rows = self.db_manager.find_sections(document_slug, section_numbers=section_numbers, user_id=user_id)
+        section_rows = self.db_manager.find_sections(
+            document_slug, section_numbers=section_numbers, user_id=user_id
+        )
         if not section_rows:
             return None
 
@@ -580,7 +611,9 @@ class StructuredRetrievalToolkit:
         navigation_map = self.get_navigation_map(refresh=True, user_id=user_id)
 
         # Resolve the code focus from either the explicit filter or the query itself.
-        resolved_document_slug = self.resolve_document_slug(jurisdiction, user_id=user_id) or self.resolve_document_slug(query, user_id=user_id)
+        resolved_document_slug = self.resolve_document_slug(
+            jurisdiction, user_id=user_id
+        ) or self.resolve_document_slug(query, user_id=user_id)
         resolved_document = navigation_map.get("documents", {}).get(resolved_document_slug or "")
 
         tool_trace: list[dict] = []
@@ -682,7 +715,9 @@ class StructuredRetrievalToolkit:
             if summary_target_slug is None and merged_results:
                 summary_target_slug = merged_results[0]["meta"].get("document_slug")
             if summary_target_slug:
-                summary_preview = self.summarize_sections(summary_target_slug, section_filters, user_id=user_id)
+                summary_preview = self.summarize_sections(
+                    summary_target_slug, section_filters, user_id=user_id
+                )
                 if summary_preview:
                     tool_trace.append(
                         {
@@ -704,7 +739,9 @@ class StructuredRetrievalToolkit:
             "navigation": navigation,
             "tool_trace": tool_trace,
             "resolved_document_slug": resolved_document_slug,
-            "resolved_document_title": resolved_document["document_title"] if resolved_document else None,
+            "resolved_document_title": (
+                resolved_document["document_title"] if resolved_document else None
+            ),
             "summary_preview": summary_preview,
         }
 
@@ -751,9 +788,7 @@ class StructuredRetrievalToolkit:
         """Run a lightweight lexical section search before falling back to the LLM."""
 
         candidate_document_slugs = (
-            [document_slug]
-            if document_slug
-            else list(navigation_map.get("documents", {}).keys())
+            [document_slug] if document_slug else list(navigation_map.get("documents", {}).keys())
         )
 
         keyword_results: list[dict] = []
@@ -792,9 +827,7 @@ class StructuredRetrievalToolkit:
         # Exact lookups are run against the SQL layer because those matches are
         # cheaper and more trustworthy than a semantic query.
         candidate_document_slugs = (
-            [document_slug]
-            if document_slug
-            else list(navigation_map.get("documents", {}).keys())
+            [document_slug] if document_slug else list(navigation_map.get("documents", {}).keys())
         )
 
         exact_results: list[dict] = []
@@ -878,7 +911,9 @@ class StructuredRetrievalToolkit:
         lexical_score: float | None = None,
     ) -> dict:
         section_text = self._compose_section_text(section_row)
-        section_summary = section_row.get("section_summary") or self.summary_builder.summarize(section_text)
+        section_summary = section_row.get("section_summary") or self.summary_builder.summarize(
+            section_text
+        )
 
         return {
             "text": section_text,
@@ -904,9 +939,13 @@ class StructuredRetrievalToolkit:
             },
         }
 
-    def _subsection_row_to_result(self, subsection_row: dict, score: float, matched_by: str) -> dict:
+    def _subsection_row_to_result(
+        self, subsection_row: dict, score: float, matched_by: str
+    ) -> dict:
         subsection_text = self._compose_subsection_text(subsection_row)
-        subsection_summary = subsection_row.get("subsection_summary") or self.summary_builder.summarize(subsection_text)
+        subsection_summary = subsection_row.get(
+            "subsection_summary"
+        ) or self.summary_builder.summarize(subsection_text)
 
         return {
             "text": subsection_text,
@@ -944,7 +983,9 @@ class StructuredRetrievalToolkit:
         return bool(user_id and owner_user_id == str(user_id))
 
     @staticmethod
-    def _semantic_where_filters(document_slug: str | None, user_id: str | None) -> list[dict | None]:
+    def _semantic_where_filters(
+        document_slug: str | None, user_id: str | None
+    ) -> list[dict | None]:
         if document_slug:
             return [{"document_slug": document_slug}]
         if user_id:
@@ -960,15 +1001,11 @@ class StructuredRetrievalToolkit:
 
         fallback = " ".join(
             (
-                subsection.get("subsection_text")
-                or subsection.get("subsection_summary")
-                or ""
+                subsection.get("subsection_text") or subsection.get("subsection_summary") or ""
             ).strip()
             for subsection in section_row.get("subsections", [])
             if (
-                subsection.get("subsection_text")
-                or subsection.get("subsection_summary")
-                or ""
+                subsection.get("subsection_text") or subsection.get("subsection_summary") or ""
             ).strip()
         )
         return fallback.strip()
@@ -1002,8 +1039,12 @@ class StructuredRetrievalToolkit:
             if current is None:
                 current = {
                     **result,
-                    "matched_methods": list(result.get("matched_methods", [result.get("matched_by", "")])),
-                    "channel_scores": {str(result.get("matched_by", "")): float(result.get("score", 0.0))},
+                    "matched_methods": list(
+                        result.get("matched_methods", [result.get("matched_by", "")])
+                    ),
+                    "channel_scores": {
+                        str(result.get("matched_by", "")): float(result.get("score", 0.0))
+                    },
                     "lexical_score": result.get("lexical_score"),
                 }
                 aggregated[key] = current
@@ -1045,7 +1086,9 @@ class StructuredRetrievalToolkit:
             )
             result["score"] = rerank_score
             result["rerank_score"] = rerank_score
-            result["matched_by"] = self._select_primary_match_method(result.get("matched_methods", []))
+            result["matched_by"] = self._select_primary_match_method(
+                result.get("matched_methods", [])
+            )
             reranked_results.append(result)
 
         reranked_results.sort(
@@ -1081,7 +1124,9 @@ class StructuredRetrievalToolkit:
                 str(meta.get("subsection") or ""),
             )
             current = deduped.get(key)
-            if current is None or float(result.get("score", 0.0)) > float(current.get("score", 0.0)):
+            if current is None or float(result.get("score", 0.0)) > float(
+                current.get("score", 0.0)
+            ):
                 deduped[key] = result
 
         return list(deduped.values())
@@ -1138,7 +1183,9 @@ class StructuredRetrievalToolkit:
         standard_terms = [term.lower() for term in (standard_terms or [])]
 
         if district_codes:
-            district_hits = sum(1 for code in district_codes if self._district_code_in_text(code, text))
+            district_hits = sum(
+                1 for code in district_codes if self._district_code_in_text(code, text)
+            )
             if district_hits:
                 rerank_score += min(district_hits * 0.16, 0.24)
             else:
@@ -1149,7 +1196,11 @@ class StructuredRetrievalToolkit:
             if standard_hits:
                 rerank_score += min(standard_hits * 0.08, 0.2)
 
-        if asks_base_zoning and self._contains_special_use_terms(text) and not self._query_mentions_special_use(" ".join(query_terms)):
+        if (
+            asks_base_zoning
+            and self._contains_special_use_terms(text)
+            and not self._query_mentions_special_use(" ".join(query_terms))
+        ):
             rerank_score -= 0.22
 
         return max(0.0, min(rerank_score, 1.0))
@@ -1216,12 +1267,13 @@ class StructuredRetrievalToolkit:
             "say",
         }
         raw_terms = re.findall(r"[a-z0-9-]+", (query or "").lower())
-        district_lookup = {code.lower() for code in StructuredRetrievalToolkit.ZONING_DISTRICT_CODES}
+        district_lookup = {
+            code.lower() for code in StructuredRetrievalToolkit.ZONING_DISTRICT_CODES
+        }
         return [
             term
             for term in raw_terms
-            if (len(term) > 2 or term in district_lookup)
-            and term not in stop_words
+            if (len(term) > 2 or term in district_lookup) and term not in stop_words
         ]
 
     @classmethod
@@ -1290,10 +1342,14 @@ class StructuredRetrievalToolkit:
         return terms
 
     @classmethod
-    def detect_base_zoning_intent(cls, query: str, district_codes: Sequence[str], standard_terms: Sequence[str]) -> bool:
+    def detect_base_zoning_intent(
+        cls, query: str, district_codes: Sequence[str], standard_terms: Sequence[str]
+    ) -> bool:
         lowered = (query or "").lower()
         has_base_term = any(term in lowered for term in cls.BASE_ZONING_TERMS)
-        return bool((district_codes or "commercial" in lowered) and (standard_terms or has_base_term))
+        return bool(
+            (district_codes or "commercial" in lowered) and (standard_terms or has_base_term)
+        )
 
     @classmethod
     def _contains_special_use_terms(cls, text: str) -> bool:

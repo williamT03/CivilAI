@@ -1,9 +1,3 @@
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.security import OAuth2PasswordBearer
-from typing import Optional
-
 import os
 import re
 import subprocess
@@ -11,10 +5,17 @@ import sys
 import threading
 import uuid
 from datetime import datetime
+from typing import Optional
+
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from CustomRAG.LLM.rag import ask
 from CustomRAG.db_scripts import ParserPipelineBuilder
+from CustomRAG.LLM.rag import ask
 from CustomRAG.tools import StructuredToolFactory
 
 try:
@@ -24,7 +25,6 @@ try:
     from backend.app.ingestion import get_ingestion_job_store
     from backend.app.security import audit_event
     from backend.app.storage import get_file_storage
-    from backend.app.worker import parse_pdf_job
 except ImportError:
     from app.ai.usage import get_usage_tracker
     from app.auth import UserResponse, auth_db, decode_token
@@ -32,7 +32,6 @@ except ImportError:
     from app.ingestion import get_ingestion_job_store
     from app.security import audit_event
     from app.storage import get_file_storage
-    from app.worker import parse_pdf_job
 
 app = FastAPI(title="Civil AI — Custom RAG")
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -66,6 +65,7 @@ def _safe_pdf_name(filename: str) -> str:
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
     return safe
 
+
 def _run_index_command(script_path: str, label: str) -> None:
     result = subprocess.run(
         [sys.executable, script_path],
@@ -86,6 +86,17 @@ def _run_optional_llama_index() -> None:
     if not ENABLE_LLAMA_SERVER:
         return
     _run_index_command(os.path.join("LlamaIndexRAG", "build_index.py"), "LlamaIndex indexing")
+
+
+def _queue_parse_pdf_job(job_id: str) -> None:
+    """Queue async parsing without making Celery a hard import-time dependency."""
+
+    try:
+        from backend.app.worker import parse_pdf_job
+    except ImportError:  # pragma: no cover
+        from app.worker import parse_pdf_job
+
+    parse_pdf_job.delay(job_id)
 
 
 def _run_custom_parse(pdf_path: str, user_id: str | None = None) -> dict:
@@ -144,9 +155,13 @@ def _enforce_message_limit(user: Optional[UserResponse]) -> None:
     if monthly_limit is None:
         return
     now = datetime.utcnow()
-    used_messages = get_usage_tracker().monthly_message_count_for_user(str(user.id), now.year, now.month)
+    used_messages = get_usage_tracker().monthly_message_count_for_user(
+        str(user.id), now.year, now.month
+    )
     if used_messages >= monthly_limit:
-        raise HTTPException(status_code=429, detail="Monthly message limit reached for this subscription.")
+        raise HTTPException(
+            status_code=429, detail="Monthly message limit reached for this subscription."
+        )
 
 
 @app.get("/query")
@@ -154,7 +169,7 @@ def query(
     q: str,
     jurisdiction: Optional[str] = Query(
         default=None,
-        description="Filter by jurisdiction: 'cooper city', 'broward county', or omit for all"
+        description="Filter by jurisdiction: 'cooper city', 'broward county', or omit for all",
     ),
     current_user: Optional[UserResponse] = Depends(get_optional_current_user),
 ):
@@ -190,7 +205,11 @@ def query(
 
 @app.get("/jurisdictions")
 def list_jurisdictions(current_user: Optional[UserResponse] = Depends(get_optional_current_user)):
-    return {"jurisdictions": TOOLKIT.list_jurisdictions(user_id=str(current_user.id) if current_user else None)}
+    return {
+        "jurisdictions": TOOLKIT.list_jurisdictions(
+            user_id=str(current_user.id) if current_user else None
+        )
+    }
 
 
 @app.get("/ingestion-jobs/{job_id}")
@@ -254,12 +273,18 @@ async def upload_pdf(
     current_user: Optional[UserResponse] = Depends(get_optional_current_user),
 ):
     filename = _safe_pdf_name(file.filename or "")
-    audit_event("upload.pdf.start", user_id=str(current_user.id) if current_user else None, filename=filename)
+    audit_event(
+        "upload.pdf.start",
+        user_id=str(current_user.id) if current_user else None,
+        filename=filename,
+    )
     content_type = (file.content_type or "").lower()
     if content_type and content_type not in {"application/pdf", "application/x-pdf"}:
         raise HTTPException(status_code=400, detail="Uploaded file must be a PDF.")
     if file.size and file.size > settings.max_upload_bytes:
-        raise HTTPException(status_code=413, detail="Uploaded PDF exceeds the configured size limit.")
+        raise HTTPException(
+            status_code=413, detail="Uploaded PDF exceeds the configured size limit."
+        )
 
     storage = get_file_storage()
     target_path = os.path.join(PDF_DIR, filename)
@@ -274,7 +299,9 @@ async def upload_pdf(
             os.remove(stored_file.local_path)
         except OSError:
             pass
-        raise HTTPException(status_code=413, detail="Uploaded PDF exceeds the configured size limit.")
+        raise HTTPException(
+            status_code=413, detail="Uploaded PDF exceeds the configured size limit."
+        )
     _validate_pdf_signature(stored_file.local_path)
 
     job_store = get_ingestion_job_store()
@@ -288,9 +315,11 @@ async def upload_pdf(
 
     if settings.async_ingestion_enabled:
         try:
-            parse_pdf_job.delay(job.id)
+            _queue_parse_pdf_job(job.id)
         except Exception as exc:
-            job_store.update_job(job.id, status="failed", stage="queue", progress=100, error=str(exc))
+            job_store.update_job(
+                job.id, status="failed", stage="queue", progress=100, error=str(exc)
+            )
             raise HTTPException(status_code=503, detail=f"Ingestion queue is unavailable: {exc}")
         return {
             "message": "PDF uploaded and queued for indexing.",
@@ -314,7 +343,9 @@ async def upload_pdf(
         job_store.update_job(job.id, status="running", stage="navigation_refresh", progress=85)
         TOOLKIT.refresh_navigation_cache()
         _run_optional_llama_index()
-        job_store.update_job(job.id, status="succeeded", stage="complete", progress=100, result=parse_result)
+        job_store.update_job(
+            job.id, status="succeeded", stage="complete", progress=100, result=parse_result
+        )
 
     if current_user:
         try:
@@ -332,7 +363,11 @@ async def upload_pdf(
             # Upload history should never block the parsing pipeline.
             pass
 
-    audit_event("upload.pdf.success", user_id=str(current_user.id) if current_user else None, filename=filename)
+    audit_event(
+        "upload.pdf.success",
+        user_id=str(current_user.id) if current_user else None,
+        filename=filename,
+    )
     return {
         "message": "PDF uploaded and indexed successfully.",
         "filename": os.path.basename(stored_file.local_path),

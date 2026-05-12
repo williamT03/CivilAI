@@ -7,9 +7,9 @@ from .frontend_features import FrontendFeaturesAgent
 from .llm_safety import LlmSafetyAgent
 from .policy_gate import PolicyGateAgent
 from .risk_register import RiskRegisterAgent
+from .security import SecurityAgent
 from .server_connections import ServerConnectionsAgent
 from .server_runtime import ServerRuntimeAgent
-from .security import SecurityAgent
 from .tenant_isolation import TenantIsolationAgent
 from .threat_model import ThreatModelAgent
 

@@ -10,13 +10,13 @@ Provides secure user authentication with:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import secrets
-import hashlib
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -53,7 +53,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_AUTH_DB_PATH = BACKEND_ROOT / "Data" / "civilai_auth.db"
 DEFAULT_AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-JWT_SECRET_KEY = require_production_secret("JWT_SECRET_KEY", os.getenv("JWT_SECRET_KEY")) or secrets.token_hex(32)
+JWT_SECRET_KEY = require_production_secret(
+    "JWT_SECRET_KEY", os.getenv("JWT_SECRET_KEY")
+) or secrets.token_hex(32)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 REFRESH_TOKEN_EXPIRE_DAYS = 30
@@ -358,15 +360,14 @@ class AuthDatabase:
     def create_user(self, user_data: UserCreate) -> UserResponse:
         """Create a new user with hashed password."""
 
-        password_hash = bcrypt.hashpw(
-            user_data.password.encode("utf-8"), bcrypt.gensalt()
-        ).decode("utf-8")
+        password_hash = bcrypt.hashpw(user_data.password.encode("utf-8"), bcrypt.gensalt()).decode(
+            "utf-8"
+        )
 
         with self.engine.begin() as connection:
             existing = connection.execute(
                 select(users).where(
-                    (users.c.email == user_data.email)
-                    | (users.c.username == user_data.username)
+                    (users.c.email == user_data.email) | (users.c.username == user_data.username)
                 )
             ).first()
 
@@ -393,9 +394,7 @@ class AuthDatabase:
             user_id = result.inserted_primary_key[0]
             self._ensure_subscription_for_user(connection, user_id)
 
-            row = connection.execute(
-                select(users).where(users.c.id == user_id)
-            ).first()
+            row = connection.execute(select(users).where(users.c.id == user_id)).first()
 
         return self._row_to_user_response(row)
 
@@ -403,14 +402,24 @@ class AuthDatabase:
         """Authenticate a user with username and password."""
 
         with self.engine.begin() as connection:
-            row = connection.execute(
-                select(users).where(users.c.username == username)
-            ).first()
+            row = connection.execute(select(users).where(users.c.username == username)).first()
 
             if not row:
                 raise ValueError("Invalid username or password")
 
-            user_id, email, db_username, password_hash, full_name, jurisdiction, is_active, is_admin, created_at, updated_at, last_login = row
+            (
+                user_id,
+                email,
+                db_username,
+                password_hash,
+                full_name,
+                jurisdiction,
+                is_active,
+                is_admin,
+                created_at,
+                updated_at,
+                last_login,
+            ) = row
 
             if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
                 raise ValueError("Invalid username or password")
@@ -419,9 +428,7 @@ class AuthDatabase:
                 raise ValueError("Account is disabled")
 
             connection.execute(
-                update(users)
-                .where(users.c.id == user_id)
-                .values(last_login=datetime.utcnow())
+                update(users).where(users.c.id == user_id).values(last_login=datetime.utcnow())
             )
 
         return self._row_to_user_response(row)
@@ -430,9 +437,7 @@ class AuthDatabase:
         """Get user by ID."""
 
         with self.engine.begin() as connection:
-            row = connection.execute(
-                select(users).where(users.c.id == user_id)
-            ).first()
+            row = connection.execute(select(users).where(users.c.id == user_id)).first()
 
             if row:
                 return self._row_to_user_response(row)
@@ -443,9 +448,7 @@ class AuthDatabase:
         """Get user by username."""
 
         with self.engine.begin() as connection:
-            row = connection.execute(
-                select(users).where(users.c.username == username)
-            ).first()
+            row = connection.execute(select(users).where(users.c.username == username)).first()
 
             if row:
                 return self._row_to_user_response(row)
@@ -471,15 +474,9 @@ class AuthDatabase:
             update_values["jurisdiction"] = jurisdiction or None
 
         with self.engine.begin() as connection:
-            connection.execute(
-                update(users)
-                .where(users.c.id == user_id)
-                .values(**update_values)
-            )
+            connection.execute(update(users).where(users.c.id == user_id).values(**update_values))
 
-            row = connection.execute(
-                select(users).where(users.c.id == user_id)
-            ).first()
+            row = connection.execute(select(users).where(users.c.id == user_id)).first()
 
         return self._row_to_user_response(row)
 
@@ -502,9 +499,7 @@ class AuthDatabase:
 
         with self.engine.begin() as connection:
             connection.execute(
-                update(refresh_tokens)
-                .where(refresh_tokens.c.token == token)
-                .values(revoked=1)
+                update(refresh_tokens).where(refresh_tokens.c.token == token).values(revoked=1)
             )
 
     def get_valid_refresh_token(self, token: str) -> Optional[dict]:
@@ -534,9 +529,7 @@ class AuthDatabase:
 
         with self.engine.begin() as connection:
             connection.execute(
-                delete(refresh_tokens).where(
-                    refresh_tokens.c.expires_at < datetime.utcnow()
-                )
+                delete(refresh_tokens).where(refresh_tokens.c.expires_at < datetime.utcnow())
             )
 
     def create_chat_thread(
@@ -561,9 +554,11 @@ class AuthDatabase:
                 )
             )
             thread_id = result.inserted_primary_key[0]
-            thread_row = connection.execute(
-                select(chat_threads).where(chat_threads.c.id == thread_id)
-            ).mappings().first()
+            thread_row = (
+                connection.execute(select(chat_threads).where(chat_threads.c.id == thread_id))
+                .mappings()
+                .first()
+            )
 
         if thread_row is None:
             raise ValueError("Thread could not be created.")
@@ -574,11 +569,15 @@ class AuthDatabase:
         """Return saved chat thread summaries for one authenticated user."""
 
         with self.engine.begin() as connection:
-            thread_rows = connection.execute(
-                select(chat_threads)
-                .where(chat_threads.c.user_id == user_id)
-                .order_by(chat_threads.c.updated_at.desc(), chat_threads.c.id.desc())
-            ).mappings().all()
+            thread_rows = (
+                connection.execute(
+                    select(chat_threads)
+                    .where(chat_threads.c.user_id == user_id)
+                    .order_by(chat_threads.c.updated_at.desc(), chat_threads.c.id.desc())
+                )
+                .mappings()
+                .all()
+            )
 
             thread_summaries: list[ChatThreadResponse] = []
             for thread_row in thread_rows:
@@ -605,25 +604,35 @@ class AuthDatabase:
 
         return thread_summaries
 
-    def get_chat_thread_detail(self, user_id: int, thread_id: int) -> Optional[ChatThreadDetailResponse]:
+    def get_chat_thread_detail(
+        self, user_id: int, thread_id: int
+    ) -> Optional[ChatThreadDetailResponse]:
         """Return one saved chat thread plus all persisted messages."""
 
         with self.engine.begin() as connection:
-            thread_row = connection.execute(
-                select(chat_threads).where(
-                    chat_threads.c.id == thread_id,
-                    chat_threads.c.user_id == user_id,
+            thread_row = (
+                connection.execute(
+                    select(chat_threads).where(
+                        chat_threads.c.id == thread_id,
+                        chat_threads.c.user_id == user_id,
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
             if thread_row is None:
                 return None
 
-            message_rows = connection.execute(
-                select(chat_messages)
-                .where(chat_messages.c.thread_id == thread_id)
-                .order_by(chat_messages.c.created_at.asc(), chat_messages.c.id.asc())
-            ).mappings().all()
+            message_rows = (
+                connection.execute(
+                    select(chat_messages)
+                    .where(chat_messages.c.thread_id == thread_id)
+                    .order_by(chat_messages.c.created_at.asc(), chat_messages.c.id.asc())
+                )
+                .mappings()
+                .all()
+            )
 
         messages = [self._message_row_to_response(message_row) for message_row in message_rows]
         preview = self._truncate_preview(messages[-1].content if messages else None)
@@ -656,7 +665,9 @@ class AuthDatabase:
 
         return True
 
-    def save_chat_turn(self, user_id: int, thread_id: int, turn_data: ChatTurnCreate) -> ChatThreadResponse:
+    def save_chat_turn(
+        self, user_id: int, thread_id: int, turn_data: ChatTurnCreate
+    ) -> ChatThreadResponse:
         """Persist one full user/assistant turn inside a saved chat thread."""
 
         now = datetime.utcnow()
@@ -664,12 +675,16 @@ class AuthDatabase:
         assistant_timestamp = turn_data.assistant_message.timestamp or now
 
         with self.engine.begin() as connection:
-            thread_row = connection.execute(
-                select(chat_threads).where(
-                    chat_threads.c.id == thread_id,
-                    chat_threads.c.user_id == user_id,
+            thread_row = (
+                connection.execute(
+                    select(chat_threads).where(
+                        chat_threads.c.id == thread_id,
+                        chat_threads.c.user_id == user_id,
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
             if thread_row is None:
                 raise ValueError("Chat thread not found.")
@@ -707,7 +722,9 @@ class AuthDatabase:
             )
 
             next_title = thread_row["title"]
-            if int(existing_message_count or 0) == 0 or self._looks_like_default_thread_title(next_title):
+            if int(existing_message_count or 0) == 0 or self._looks_like_default_thread_title(
+                next_title
+            ):
                 next_title = self._derive_thread_title(turn_data.user_message.content)
 
             next_jurisdiction = (
@@ -726,9 +743,11 @@ class AuthDatabase:
                 )
             )
 
-            updated_thread_row = connection.execute(
-                select(chat_threads).where(chat_threads.c.id == thread_id)
-            ).mappings().first()
+            updated_thread_row = (
+                connection.execute(select(chat_threads).where(chat_threads.c.id == thread_id))
+                .mappings()
+                .first()
+            )
 
         if updated_thread_row is None:
             raise ValueError("Chat thread could not be updated.")
@@ -756,12 +775,16 @@ class AuthDatabase:
         now = datetime.utcnow()
 
         with self.engine.begin() as connection:
-            existing_row = connection.execute(
-                select(uploaded_documents).where(
-                    uploaded_documents.c.user_id == user_id,
-                    uploaded_documents.c.filename == filename,
+            existing_row = (
+                connection.execute(
+                    select(uploaded_documents).where(
+                        uploaded_documents.c.user_id == user_id,
+                        uploaded_documents.c.filename == filename,
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
             if existing_row is None:
                 result = connection.execute(
@@ -794,9 +817,13 @@ class AuthDatabase:
                     )
                 )
 
-            upload_row = connection.execute(
-                select(uploaded_documents).where(uploaded_documents.c.id == upload_id)
-            ).mappings().first()
+            upload_row = (
+                connection.execute(
+                    select(uploaded_documents).where(uploaded_documents.c.id == upload_id)
+                )
+                .mappings()
+                .first()
+            )
 
         if upload_row is None:
             raise ValueError("Uploaded document could not be recorded.")
@@ -807,11 +834,17 @@ class AuthDatabase:
         """Return the authenticated user's uploaded PDF records, newest first."""
 
         with self.engine.begin() as connection:
-            rows = connection.execute(
-                select(uploaded_documents)
-                .where(uploaded_documents.c.user_id == user_id)
-                .order_by(uploaded_documents.c.uploaded_at.desc(), uploaded_documents.c.id.desc())
-            ).mappings().all()
+            rows = (
+                connection.execute(
+                    select(uploaded_documents)
+                    .where(uploaded_documents.c.user_id == user_id)
+                    .order_by(
+                        uploaded_documents.c.uploaded_at.desc(), uploaded_documents.c.id.desc()
+                    )
+                )
+                .mappings()
+                .all()
+            )
 
         return [self._upload_row_to_response(row) for row in rows]
 
@@ -835,7 +868,11 @@ class AuthDatabase:
                 )
             )
             api_key_id = result.inserted_primary_key[0]
-            row = connection.execute(select(api_keys).where(api_keys.c.id == api_key_id)).mappings().first()
+            row = (
+                connection.execute(select(api_keys).where(api_keys.c.id == api_key_id))
+                .mappings()
+                .first()
+            )
 
         response = self._api_key_row_to_response(row)
         response.api_key = secret
@@ -845,11 +882,15 @@ class AuthDatabase:
         """List non-revoked API keys for one user without exposing secrets."""
 
         with self.engine.begin() as connection:
-            rows = connection.execute(
-                select(api_keys)
-                .where(api_keys.c.user_id == user_id, api_keys.c.revoked == 0)
-                .order_by(api_keys.c.created_at.desc())
-            ).mappings().all()
+            rows = (
+                connection.execute(
+                    select(api_keys)
+                    .where(api_keys.c.user_id == user_id, api_keys.c.revoked == 0)
+                    .order_by(api_keys.c.created_at.desc())
+                )
+                .mappings()
+                .all()
+            )
 
         return [self._api_key_row_to_response(row) for row in rows]
 
@@ -867,9 +908,7 @@ class AuthDatabase:
             if row is None:
                 return False
             connection.execute(
-                update(api_keys)
-                .where(api_keys.c.id == api_key_id)
-                .values(revoked=1)
+                update(api_keys).where(api_keys.c.id == api_key_id).values(revoked=1)
             )
         return True
 
@@ -881,12 +920,16 @@ class AuthDatabase:
 
         key_hash = self._hash_api_key(raw_api_key)
         with self.engine.begin() as connection:
-            key_row = connection.execute(
-                select(api_keys).where(
-                    api_keys.c.key_hash == key_hash,
-                    api_keys.c.revoked == 0,
+            key_row = (
+                connection.execute(
+                    select(api_keys).where(
+                        api_keys.c.key_hash == key_hash,
+                        api_keys.c.revoked == 0,
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if key_row is None:
                 return None
 
@@ -896,7 +939,9 @@ class AuthDatabase:
                 .values(last_used_at=datetime.utcnow())
             )
 
-            user_row = connection.execute(select(users).where(users.c.id == key_row["user_id"])).first()
+            user_row = connection.execute(
+                select(users).where(users.c.id == key_row["user_id"])
+            ).first()
 
         if not user_row:
             return None
@@ -908,9 +953,11 @@ class AuthDatabase:
 
         with self.engine.begin() as connection:
             self._ensure_subscription_for_user(connection, user_id)
-            row = connection.execute(
-                select(subscriptions).where(subscriptions.c.user_id == user_id)
-            ).mappings().first()
+            row = (
+                connection.execute(select(subscriptions).where(subscriptions.c.user_id == user_id))
+                .mappings()
+                .first()
+            )
 
         return self._subscription_row_to_response(row)
 

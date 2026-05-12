@@ -53,23 +53,28 @@ def _estimate_accuracy(query: str, search_payload: dict) -> dict:
         match_type.startswith("keyword") for match_type in top_match_types
     )
     retrieved_text = " ".join(
-        f"{result.get('summary', '')} {result.get('text', '')}".lower()
-        for result in results[:3]
+        f"{result.get('summary', '')} {result.get('text', '')}".lower() for result in results[:3]
     )
     covered_terms = sum(1 for term in query_terms if term in retrieved_text)
     coverage = covered_terms / max(len(query_terms), 1)
 
-    score_strength = sum(float(result.get("score", 0.0)) for result in results[:3]) / max(len(results[:3]), 1)
+    score_strength = sum(float(result.get("score", 0.0)) for result in results[:3]) / max(
+        len(results[:3]), 1
+    )
     support_count = min(len(results) / 5, 1.0)
-    exact_match_strength = 1.0 if any(
-        str(result.get("matched_by", "")).startswith("exact") for result in results[:3]
-    ) else 0.35
+    exact_match_strength = (
+        1.0
+        if any(str(result.get("matched_by", "")).startswith("exact") for result in results[:3])
+        else 0.35
+    )
 
     matched_sections = search_payload.get("navigation", {}).get("matched_sections", [])
     section_match = 0.65
     if matched_sections:
         top_sections = {result.get("meta", {}).get("section") for result in results[:3]}
-        section_match = 1.0 if any(section in top_sections for section in matched_sections) else 0.25
+        section_match = (
+            1.0 if any(section in top_sections for section in matched_sections) else 0.25
+        )
 
     raw_score = (
         0.40 * score_strength
@@ -90,17 +95,23 @@ def _estimate_accuracy(query: str, search_payload: dict) -> dict:
         label = "Low"
 
     if matched_sections and section_match >= 1.0:
-        reason = "The tool chain found the requested section directly and the top evidence matches it."
+        reason = (
+            "The tool chain found the requested section directly and the top evidence matches it."
+        )
     elif exact_match_strength >= 1.0:
         reason = "At least one exact section or subsection match was found and supported by the retrieved text."
     elif keyword_only:
-        reason = "Only loose keyword overlap was found, so the supporting ordinance evidence is weak."
+        reason = (
+            "Only loose keyword overlap was found, so the supporting ordinance evidence is weak."
+        )
     elif coverage >= 0.7:
         reason = "Most of the important query terms appear in the strongest retrieved ordinance evidence."
     elif coverage >= 0.4:
         reason = "The retrieved ordinance evidence partially overlaps the query, but the support is mixed."
     else:
-        reason = "Only limited overlap was found between the query and the retrieved ordinance evidence."
+        reason = (
+            "Only limited overlap was found between the query and the retrieved ordinance evidence."
+        )
 
     return {
         "score": score,

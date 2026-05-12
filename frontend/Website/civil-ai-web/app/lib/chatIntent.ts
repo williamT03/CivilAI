@@ -55,8 +55,7 @@ export function readPendingChatPrompt(): PendingChatPrompt | null {
       return {
         prompt: parsed.prompt.trim(),
         source: "home",
-        createdAt:
-          typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
+        createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
       };
     }
   } catch {

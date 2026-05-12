@@ -37,7 +37,9 @@ class FeatureFlowAgent(BaseAgent):
         }
         missing = [name for name, path in expected_routes.items() if not path.exists()]
         if missing:
-            return self.fail_result("frontend-routes", "Expected feature routes are missing.", missing=missing)
+            return self.fail_result(
+                "frontend-routes", "Expected feature routes are missing.", missing=missing
+            )
         return self.pass_result("frontend-routes", "Expected frontend feature routes exist.")
 
     def _check_api_config_defaults(self) -> CheckResult:
@@ -46,8 +48,14 @@ class FeatureFlowAgent(BaseAgent):
         expected = ["NEXT_PUBLIC_API_BASE", "/api/auth", "/api/custom", "/api/llama"]
         missing = [item for item in expected if item not in text]
         if missing:
-            return self.fail_result("api-config", "Frontend API config is missing expected base URL handling.", missing=missing)
-        return self.pass_result("api-config", "Frontend API config exposes expected backend base URLs.")
+            return self.fail_result(
+                "api-config",
+                "Frontend API config is missing expected base URL handling.",
+                missing=missing,
+            )
+        return self.pass_result(
+            "api-config", "Frontend API config exposes expected backend base URLs."
+        )
 
     def _check_auth_context_token_handling(self) -> CheckResult:
         auth_context = self.frontend_root / "app" / "context" / "AuthContext.tsx"
@@ -55,17 +63,27 @@ class FeatureFlowAgent(BaseAgent):
         expected = ["access_token", "refresh_token", "localStorage", "logout"]
         missing = [item for item in expected if item not in text]
         if missing:
-            return self.warn_result("auth-context", "Auth context may be missing expected token flow pieces.", missing=missing)
-        return self.pass_result("auth-context", "Auth context includes expected token persistence and logout pieces.")
+            return self.warn_result(
+                "auth-context",
+                "Auth context may be missing expected token flow pieces.",
+                missing=missing,
+            )
+        return self.pass_result(
+            "auth-context", "Auth context includes expected token persistence and logout pieces."
+        )
 
     def _check_frontend_lint(self) -> CheckResult:
         try:
             result = run_command(["npm", "run", "lint"], self.frontend_root, timeout_seconds=180)
         except FileNotFoundError:
-            return self.skip_result("frontend-lint", "npm was not found on PATH; frontend lint skipped.")
+            return self.skip_result(
+                "frontend-lint", "npm was not found on PATH; frontend lint skipped."
+            )
         if result.returncode == 0:
             return self.pass_result("frontend-lint", "Frontend lint passes.")
-        return self.fail_result("frontend-lint", "Frontend lint failed.", output=(result.stdout + result.stderr)[-4000:])
+        return self.fail_result(
+            "frontend-lint", "Frontend lint failed.", output=(result.stdout + result.stderr)[-4000:]
+        )
 
     def _check_frontend_build(self) -> CheckResult:
         if self.context.skip_frontend_build:
@@ -73,17 +91,31 @@ class FeatureFlowAgent(BaseAgent):
         try:
             result = run_command(["npm", "run", "build"], self.frontend_root, timeout_seconds=300)
         except FileNotFoundError:
-            return self.skip_result("frontend-build", "npm was not found on PATH; frontend build skipped.")
+            return self.skip_result(
+                "frontend-build", "npm was not found on PATH; frontend build skipped."
+            )
         if result.returncode == 0:
             return self.pass_result("frontend-build", "Frontend production build passes.")
-        return self.fail_result("frontend-build", "Frontend production build failed.", output=(result.stdout + result.stderr)[-4000:])
+        return self.fail_result(
+            "frontend-build",
+            "Frontend production build failed.",
+            output=(result.stdout + result.stderr)[-4000:],
+        )
 
     def _check_frontend_runtime(self) -> CheckResult:
         try:
             response = request("GET", self.context.frontend_url, timeout_seconds=10)
         except ConnectionError as exc:
-            return self.skip_result("frontend-runtime", "Frontend dev server is not reachable; browser-level flow check skipped.", error=str(exc))
+            return self.skip_result(
+                "frontend-runtime",
+                "Frontend dev server is not reachable; browser-level flow check skipped.",
+                error=str(exc),
+            )
 
         if response.status == 200:
             return self.pass_result("frontend-runtime", "Frontend URL is reachable.")
-        return self.fail_result("frontend-runtime", "Frontend URL returned an unexpected status.", status=response.status)
+        return self.fail_result(
+            "frontend-runtime",
+            "Frontend URL returned an unexpected status.",
+            status=response.status,
+        )

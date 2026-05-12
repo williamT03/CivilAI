@@ -31,5 +31,7 @@ class AuditLogAgent(BaseAgent):
             if event in text:
                 results.append(self.pass_result(f"audit-{event}", f"{event} is logged."))
             else:
-                results.append(self.fail_result(f"audit-{event}", f"{event} is not logged.", file=path))
+                results.append(
+                    self.fail_result(f"audit-{event}", f"{event} is not logged.", file=path)
+                )
         return results

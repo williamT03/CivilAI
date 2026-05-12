@@ -95,7 +95,9 @@ def upgrade() -> None:
         sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
         *timestamps(),
     )
-    op.create_index("ix_subsections_section_number", "subsections", ["section_id", "subsection_number"])
+    op.create_index(
+        "ix_subsections_section_number", "subsections", ["section_id", "subsection_number"]
+    )
 
     op.create_table(
         "uploads",
@@ -152,7 +154,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
     )
-    op.create_index("ix_ingestion_jobs_runtime_user_status", "ingestion_jobs_runtime", ["user_id", "status"])
+    op.create_index(
+        "ix_ingestion_jobs_runtime_user_status", "ingestion_jobs_runtime", ["user_id", "status"]
+    )
 
     op.create_table(
         "usage_logs",

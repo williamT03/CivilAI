@@ -59,13 +59,17 @@ class TestDatabaseManager(unittest.TestCase):
 
         self.assertEqual(len(subsections), 1)
         self.assertEqual(subsections[0]["subsection_number"], "(b)")
-        self.assertIn("designate code compliance officers", subsections[0]["subsection_text"].lower())
+        self.assertIn(
+            "designate code compliance officers", subsections[0]["subsection_text"].lower()
+        )
 
     def test_drop_document_schema_removes_document(self) -> None:
         self.db_manager.drop_document_schema("sample_city_code_of_ordinances")
 
         self.assertEqual(self.db_manager.list_documents(), [])
-        self.assertIsNone(self.db_manager.fetch_document_hierarchy("sample_city_code_of_ordinances"))
+        self.assertIsNone(
+            self.db_manager.fetch_document_hierarchy("sample_city_code_of_ordinances")
+        )
 
 
 if __name__ == "__main__":

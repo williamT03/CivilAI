@@ -4,44 +4,18 @@ import argparse
 import json
 import os
 from dataclasses import asdict
-from pathlib import Path
 
 from .agents import AGENT_REGISTRY
-from .models import AgentContext, AgentReport, CheckResult, CheckStatus
-
-AGENT_GROUPS = {
-    "all": list(AGENT_REGISTRY.keys()),
-    "server-safe": [
-        "risk-register",
-        "policy-gate",
-        "deployment-gate",
-        "server-runtime",
-        "server-connections",
-        "security",
-        "data-leak",
-        "threat-model",
-        "audit-log",
-        "llm-safety",
-    ],
-    "runtime-deep": [
-        "api-contract",
-        "tenant-isolation",
-        "server-connections",
-        "deployment-gate",
-        "data-leak",
-        "llm-safety",
-    ],
-    "frontend": [
-        "feature-flow",
-        "frontend-features",
-    ],
-}
+from .models import AgentReport, CheckResult, CheckStatus
+from .run_plan import AGENT_GROUPS, AgentRunPlanBuilder
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run CivilAI agentic engineering checks.")
     parser.add_argument("--repo-root", required=True)
-    parser.add_argument("--agent", choices=[*AGENT_GROUPS.keys(), *AGENT_REGISTRY.keys()], default="all")
+    parser.add_argument(
+        "--agent", choices=[*AGENT_GROUPS.keys(), *AGENT_REGISTRY.keys()], default="all"
+    )
     parser.add_argument("--backend-url", default="http://127.0.0.1:8000")
     parser.add_argument("--frontend-url", default="http://localhost:3000")
     parser.add_argument("--report-dir", default="")
@@ -52,24 +26,22 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    repo_root = Path(args.repo_root).resolve()
-    report_dir = Path(args.report_dir).resolve() if args.report_dir else repo_root / "agents" / "reports"
-    report_dir.mkdir(parents=True, exist_ok=True)
-
-    context = AgentContext(
-        repo_root=str(repo_root),
-        backend_url=args.backend_url.rstrip("/"),
-        frontend_url=args.frontend_url.rstrip("/"),
-        report_dir=str(report_dir),
-        skip_frontend_build=args.skip_frontend_build,
-        skip_dependency_audit=args.skip_dependency_audit,
+    plan = (
+        AgentRunPlanBuilder()
+        .with_repo_root(args.repo_root)
+        .with_report_dir(args.report_dir)
+        .with_agent(args.agent)
+        .with_backend_url(args.backend_url)
+        .with_frontend_url(args.frontend_url)
+        .with_skip_frontend_build(args.skip_frontend_build)
+        .with_skip_dependency_audit(args.skip_dependency_audit)
+        .build()
     )
 
-    selected = AGENT_GROUPS.get(args.agent, [args.agent])
     overall_results = []
 
-    for agent_name in selected:
-        agent = AGENT_REGISTRY[agent_name](context)
+    for agent_name in plan.selected_agents:
+        agent = AGENT_REGISTRY[agent_name](plan.context)
         print(f"\n[{agent.name}] {agent.description}")
         try:
             results = agent.run()
@@ -84,7 +56,7 @@ def main() -> int:
             ]
         overall_results.extend(results)
         report = AgentReport.from_results(agent.name, results)
-        report_path = report_dir / f"{agent.name}.json"
+        report_path = plan.context.report_path / f"{agent.name}.json"
         report_path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
 
         for result in results:

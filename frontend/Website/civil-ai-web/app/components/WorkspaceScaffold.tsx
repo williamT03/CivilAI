@@ -9,10 +9,7 @@ interface WorkspaceScaffoldProps {
   mainClassName?: string;
 }
 
-export function WorkspaceScaffold({
-  children,
-  mainClassName = "",
-}: WorkspaceScaffoldProps) {
+export function WorkspaceScaffold({ children, mainClassName = "" }: WorkspaceScaffoldProps) {
   return (
     <div className="app-shell revamp-shell">
       <div className="page-frame scene-page-frame workspace-frame">
