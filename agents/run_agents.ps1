@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("all", "security", "api-contract", "feature-flow")]
+  [ValidateSet("all", "security", "api-contract", "feature-flow", "frontend-features", "server-connections", "server-runtime")]
   [string]$Agent = "all",
   [string]$BackendUrl = "http://127.0.0.1:8000",
   [string]$FrontendUrl = "http://localhost:3000",
