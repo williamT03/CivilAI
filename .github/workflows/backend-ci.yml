@@ -22,5 +22,5 @@ jobs:
       - name: Compile backend
         run: python -m compileall backend
       - name: Run backend tests
-        run: pytest backend/CustomRAG/test -q
+        run: pytest C:\Users\drago\Documents\Coding assignments\CivilAI\backend\Features\Runtime_management\runtime_run.py -q
 
