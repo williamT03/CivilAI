@@ -121,6 +121,13 @@ sudo ./backend/agents/uninstall_server_timer.sh
 
 ## Review Reports
 
+Show Skips:
+
+```bash
+grep -R '"status": "skip"' backend/agents/reports/server/*.json -n
+
+```
+
 Show failures:
 
 ```bash
