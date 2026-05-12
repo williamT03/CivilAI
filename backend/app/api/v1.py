@@ -14,6 +14,7 @@ try:
     from backend.app.auth import UserResponse, auth_db, decode_token, get_current_user
     from backend.app.core.config import get_settings
     from backend.app.ingestion import IngestionJob, get_ingestion_job_store
+    from backend.app.security import audit_event
     from backend.app.storage import get_file_storage
     from backend.CustomRAG.LLM.llm import stream_answer
     from backend.CustomRAG.LLM.rag import ask, retrieve
@@ -22,6 +23,7 @@ except ImportError:  # pragma: no cover
     from app.auth import UserResponse, auth_db, decode_token, get_current_user
     from app.core.config import get_settings
     from app.ingestion import IngestionJob, get_ingestion_job_store
+    from app.security import audit_event
     from app.storage import get_file_storage
     from CustomRAG.LLM.llm import stream_answer
     from CustomRAG.LLM.rag import ask, retrieve
@@ -210,6 +212,7 @@ def query_v1(
     request_id = str(uuid.uuid4())
     user_id = str(current_user.id) if current_user else None
     _enforce_usage_limit(current_user)
+    audit_event("api.query", user_id=user_id, request_id=request_id, jurisdiction=payload.jurisdiction)
     result = ask(
         payload.question,
         top_k=payload.top_k,
@@ -261,6 +264,7 @@ def query_stream_v1(
     request_id = str(uuid.uuid4())
     user_id = str(current_user.id) if current_user else None
     _enforce_usage_limit(current_user)
+    audit_event("api.query.stream", user_id=user_id, request_id=request_id, jurisdiction=payload.jurisdiction)
     retrieval = retrieve(
         query=payload.question,
         top_k=payload.top_k,
@@ -301,8 +305,10 @@ def create_signed_upload_url(
     """Create a tenant-scoped signed upload URL for R2/S3 PDF uploads."""
 
     if not payload.filename.lower().endswith(".pdf"):
+        audit_event("upload.signed_url.failure", user_id=current_user.id, filename=payload.filename, reason="non_pdf")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF uploads are supported.")
     try:
+        audit_event("upload.signed_url.create", user_id=current_user.id, filename=payload.filename)
         return get_file_storage().create_presigned_upload_url(
             filename=payload.filename,
             user_id=str(current_user.id),

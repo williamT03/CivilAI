@@ -1,0 +1,13 @@
+[Unit]
+Description=Run CivilAI Agentic Engineering Checks Automatically
+
+[Timer]
+# Run after boot, then every hour. Override in /etc/systemd/system if needed.
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+RandomizedDelaySec=3min
+Unit=civilai-agents.service
+
+[Install]
+WantedBy=timers.target

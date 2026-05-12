@@ -8,11 +8,39 @@ from pathlib import Path
 from .agents import AGENT_REGISTRY
 from .models import AgentContext, AgentReport, CheckStatus
 
+AGENT_GROUPS = {
+    "all": list(AGENT_REGISTRY.keys()),
+    "server-safe": [
+        "risk-register",
+        "policy-gate",
+        "deployment-gate",
+        "server-runtime",
+        "server-connections",
+        "security",
+        "data-leak",
+        "threat-model",
+        "audit-log",
+        "llm-safety",
+    ],
+    "runtime-deep": [
+        "api-contract",
+        "tenant-isolation",
+        "server-connections",
+        "deployment-gate",
+        "data-leak",
+        "llm-safety",
+    ],
+    "frontend": [
+        "feature-flow",
+        "frontend-features",
+    ],
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run CivilAI agentic engineering checks.")
     parser.add_argument("--repo-root", required=True)
-    parser.add_argument("--agent", choices=["all", *AGENT_REGISTRY.keys()], default="all")
+    parser.add_argument("--agent", choices=[*AGENT_GROUPS.keys(), *AGENT_REGISTRY.keys()], default="all")
     parser.add_argument("--backend-url", default="http://127.0.0.1:8000")
     parser.add_argument("--frontend-url", default="http://localhost:3000")
     parser.add_argument("--report-dir", default="")
@@ -36,7 +64,7 @@ def main() -> int:
         skip_dependency_audit=args.skip_dependency_audit,
     )
 
-    selected = AGENT_REGISTRY.keys() if args.agent == "all" else [args.agent]
+    selected = AGENT_GROUPS.get(args.agent, [args.agent])
     overall_results = []
 
     for agent_name in selected:

@@ -4,7 +4,9 @@ import logging
 import time
 from collections import defaultdict, deque
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -29,9 +31,11 @@ except ImportError:  # pragma: no cover
 try:
     from backend.app.api.v1 import router as api_v1_router
     from backend.app.core.config import get_settings
+    from backend.app.security import audit_event, sanitize_detail
 except ImportError:
     from app.api.v1 import router as api_v1_router
     from app.core.config import get_settings
+    from app.security import audit_event, sanitize_detail
 
 try:
     from backend.app.app_custom import app as custom_app
@@ -126,6 +130,7 @@ class SecurityBoundaryMiddleware(BaseHTTPMiddleware):
         while window and now - window[0] > 60:
             window.popleft()
         if len(window) >= self.rate_limit_per_minute:
+            audit_event("security.rate_limit", client_ip=client_ip, path=request.url.path)
             return Response("Rate limit exceeded\n", status_code=429, media_type="text/plain")
         window.append(now)
 
@@ -150,6 +155,17 @@ app.add_middleware(
     rate_limit_per_minute=settings.rate_limit_per_minute,
 )
 app.add_middleware(RequestObservabilityMiddleware)
+
+
+@app.exception_handler(HTTPException)
+async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
+    exc.detail = sanitize_detail(exc.detail)
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_validation_exception_handler(request: Request, exc: RequestValidationError):
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.get("/health")

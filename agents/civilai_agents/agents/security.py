@@ -38,6 +38,8 @@ class SecurityAgent(BaseAgent):
     def _check_jwt_secret_configuration(self) -> CheckResult:
         auth_file = self.repo_root / "backend" / "app" / "auth.py"
         text = auth_file.read_text(encoding="utf-8", errors="replace")
+        if "require_production_secret(\"JWT_SECRET_KEY\"" in text:
+            return self.pass_result("jwt-secret", "JWT secret is configurable and required in production/server environments.")
         if 'os.getenv("JWT_SECRET_KEY", secrets.token_hex(32))' in text:
             return self.warn_result(
                 "jwt-secret",

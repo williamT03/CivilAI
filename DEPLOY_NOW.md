@@ -131,6 +131,32 @@ After Pages deploys:
 5. Confirm the uploaded PDF appears in the filter after processing.
 6. Open one of the returned source links and confirm it lands on the correct PDF page.
 
+## 7.5. Enable automatic agentic checks
+
+Install the automated server-side agent checks:
+
+```bash
+cd ~/CivilAI
+chmod +x ./agents/install_server_timer.sh ./agents/uninstall_server_timer.sh
+sudo ./agents/install_server_timer.sh
+sudo systemctl start civilai-agents.service
+```
+
+Configure URLs and agent behavior:
+
+```bash
+sudo nano /etc/civilai/agents.env
+```
+
+Check status and logs:
+
+```bash
+systemctl list-timers civilai-agents.timer
+journalctl -u civilai-agents.service -n 100 --no-pager
+```
+
+Reports are written to `agents/reports/server/` by default.
+
 ## 8. Updating later
 
 On the server:

@@ -40,6 +40,11 @@ from sqlalchemy import (
     update,
 )
 
+try:
+    from backend.app.security import audit_event, require_production_secret
+except ImportError:  # pragma: no cover
+    from app.security import audit_event, require_production_secret
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -48,7 +53,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_AUTH_DB_PATH = BACKEND_ROOT / "Data" / "civilai_auth.db"
 DEFAULT_AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_hex(32))
+JWT_SECRET_KEY = require_production_secret("JWT_SECRET_KEY", os.getenv("JWT_SECRET_KEY")) or secrets.token_hex(32)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 REFRESH_TOKEN_EXPIRE_DAYS = 30
@@ -1178,8 +1183,10 @@ def register(user_data: UserCreate):
 
     try:
         user = auth_db.create_user(user_data)
+        audit_event("auth.register.success", user_id=user.id, username=user.username)
         return user
     except ValueError as e:
+        audit_event("auth.register.failure", username=user_data.username, reason=str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -1201,6 +1208,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
         auth_db.cleanup_expired_tokens()
 
+        audit_event("auth.login.success", user_id=user.id, username=user.username)
         return Token(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -1208,6 +1216,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
     except ValueError as e:
+        audit_event("auth.login.failure", username=form_data.username, reason=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
@@ -1253,6 +1262,7 @@ def refresh(refresh_token: str = Query(..., description="Refresh token")):
         auth_db.save_refresh_token(user.id, new_refresh_token, expires_at)
 
         auth_db.revoke_refresh_token(refresh_token)
+        audit_event("auth.refresh.success", user_id=user.id)
 
         return Token(
             access_token=access_token,
@@ -1261,6 +1271,7 @@ def refresh(refresh_token: str = Query(..., description="Refresh token")):
             expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
     except jwt.InvalidTokenError:
+        audit_event("auth.refresh.failure", reason="invalid_token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
@@ -1274,6 +1285,7 @@ def logout(refresh_token: Optional[str] = Query(None)):
 
     if refresh_token:
         auth_db.revoke_refresh_token(refresh_token)
+    audit_event("auth.logout")
 
     return {"message": "Successfully logged out"}
 
@@ -1292,6 +1304,7 @@ def update_me(
 ):
     """Update the current user's editable profile fields."""
 
+    audit_event("auth.profile.update", user_id=current_user.id)
     return auth_db.update_user(
         user_id=current_user.id,
         full_name=user_data.full_name,
@@ -1313,6 +1326,7 @@ def create_saved_chat(
 ):
     """Create a new empty chat thread for the current authenticated user."""
 
+    audit_event("chat.thread.create", user_id=current_user.id)
     return auth_db.create_chat_thread(
         user_id=current_user.id,
         title=payload.title,
@@ -1336,7 +1350,9 @@ def delete_saved_chat(thread_id: int, current_user: UserResponse = Depends(get_c
 
     deleted = auth_db.delete_chat_thread(current_user.id, thread_id)
     if not deleted:
+        audit_event("chat.thread.delete.failure", user_id=current_user.id, thread_id=thread_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat thread not found")
+    audit_event("chat.thread.delete.success", user_id=current_user.id, thread_id=thread_id)
     return None
 
 
@@ -1349,12 +1365,14 @@ def save_chat_turn(
     """Persist one full user/assistant exchange into a saved chat thread."""
 
     try:
+        audit_event("chat.turn.save", user_id=current_user.id, thread_id=thread_id)
         return auth_db.save_chat_turn(
             user_id=current_user.id,
             thread_id=thread_id,
             turn_data=payload,
         )
     except ValueError as exc:
+        audit_event("chat.turn.save.failure", user_id=current_user.id, thread_id=thread_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
@@ -1386,6 +1404,7 @@ def create_api_key(
 ):
     """Create a new API key. The secret is returned once."""
 
+    audit_event("api_key.create", user_id=current_user.id, name=payload.name)
     return auth_db.create_api_key(current_user.id, payload.name)
 
 
@@ -1397,5 +1416,7 @@ def revoke_api_key(
     """Revoke one API key owned by the current user."""
 
     if not auth_db.revoke_api_key(current_user.id, api_key_id):
+        audit_event("api_key.revoke.failure", user_id=current_user.id, api_key_id=api_key_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+    audit_event("api_key.revoke.success", user_id=current_user.id, api_key_id=api_key_id)
     return None

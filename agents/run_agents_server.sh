@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-AGENT="${1:-all}"
+AGENT="${1:-${CIVILAI_AGENT_SET:-server-safe}}"
 BACKEND_URL="${CIVILAI_BACKEND_URL:-http://127.0.0.1:8000}"
 FRONTEND_URL="${CIVILAI_FRONTEND_URL:-https://civilai.willcloudlab.com}"
 REPORT_DIR="${CIVILAI_AGENT_REPORT_DIR:-$SCRIPT_DIR/reports/server}"

@@ -22,6 +22,7 @@ try:
     from backend.app.auth import UserResponse, auth_db, decode_token
     from backend.app.core.config import get_settings
     from backend.app.ingestion import get_ingestion_job_store
+    from backend.app.security import audit_event
     from backend.app.storage import get_file_storage
     from backend.app.worker import parse_pdf_job
 except ImportError:
@@ -29,6 +30,7 @@ except ImportError:
     from app.auth import UserResponse, auth_db, decode_token
     from app.core.config import get_settings
     from app.ingestion import get_ingestion_job_store
+    from app.security import audit_event
     from app.storage import get_file_storage
     from app.worker import parse_pdf_job
 
@@ -165,6 +167,11 @@ def query(
       /query?q=capital+improvements+fund   ← searches all jurisdictions
     """
     _enforce_message_limit(current_user)
+    audit_event(
+        "custom.query",
+        user_id=str(current_user.id) if current_user else None,
+        jurisdiction=jurisdiction,
+    )
     result = ask(
         q,
         jurisdiction=jurisdiction,
@@ -247,6 +254,7 @@ async def upload_pdf(
     current_user: Optional[UserResponse] = Depends(get_optional_current_user),
 ):
     filename = _safe_pdf_name(file.filename or "")
+    audit_event("upload.pdf.start", user_id=str(current_user.id) if current_user else None, filename=filename)
     content_type = (file.content_type or "").lower()
     if content_type and content_type not in {"application/pdf", "application/x-pdf"}:
         raise HTTPException(status_code=400, detail="Uploaded file must be a PDF.")
@@ -324,6 +332,7 @@ async def upload_pdf(
             # Upload history should never block the parsing pipeline.
             pass
 
+    audit_event("upload.pdf.success", user_id=str(current_user.id) if current_user else None, filename=filename)
     return {
         "message": "PDF uploaded and indexed successfully.",
         "filename": os.path.basename(stored_file.local_path),
