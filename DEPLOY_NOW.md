@@ -31,7 +31,6 @@ DEEPSEEK_API_BASE=https://api.deepseek.com
 CUSTOM_RAG_BASE_URL=https://civilai-api.willcloudlab.com/api/custom
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3
-ENABLE_LLAMA_SERVER=false
 ```
 
 ## 3. Parse and verify data
@@ -41,12 +40,11 @@ Make sure your ordinance PDFs are in `backend/Data/PDF`, then run:
 ```bash
 cd ~/CivilAI
 source .venv/bin/activate
-export ENABLE_LLAMA_SERVER=false
 export PARSE_MAX_WORKERS=1
 export PARSE_EMBED_BATCH_SIZE=2
 export PARSE_EMBED_CHUNK_GROUP_SIZE=32
 export PARSE_CHROMA_BATCH_SIZE=100
-python backend/CustomRAG/parse.py
+python -m backend.Features.Pipeline_management.Parser.parser_run
 ```
 
 ## 4. Run backend as a service
@@ -137,8 +135,8 @@ Install the automated server-side agent checks:
 
 ```bash
 cd ~/CivilAI
-chmod +x ./agents/install_server_timer.sh ./agents/uninstall_server_timer.sh
-sudo ./agents/install_server_timer.sh
+chmod +x ./backend/agents/install_server_timer.sh ./backend/agents/uninstall_server_timer.sh
+sudo ./backend/agents/install_server_timer.sh
 sudo systemctl start civilai-agents.service
 ```
 
@@ -155,7 +153,7 @@ systemctl list-timers civilai-agents.timer
 journalctl -u civilai-agents.service -n 100 --no-pager
 ```
 
-Reports are written to `agents/reports/server/` by default.
+Reports are written to `backend/agents/reports/server/` by default.
 
 ## 8. Updating later
 

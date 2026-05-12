@@ -16,7 +16,7 @@ The `*_run` file is the public surface. `Tools/` is where builders, adapters, an
 
 - `backend/Features`: backend feature facades for API, auth, RAG, LLM/providers, ingestion, storage, and deployment runtime.
 - `frontend/Website/civil-ai-web/Features`: frontend feature facades for chat, auth experience, layout, routes, API clients, and assets.
-- `agents/Features`: agentic engineering facades for runners, check agents, runtime checks, static checks, reporting, and deploy automation.
+- `backend/agents/Features`: agentic engineering facades for runners, check agents, runtime checks, static checks, reporting, and deploy automation.
 - `scripts/Features`: utility script facades for formatting and ordinance downloads.
 - `deploy/Features`: deployment config purpose docs and entry points.
 

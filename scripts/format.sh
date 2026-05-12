@@ -11,8 +11,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 cd "$REPO_ROOT"
-"$PYTHON_BIN" -m isort backend agents scripts
-"$PYTHON_BIN" -m black backend agents scripts
+"$PYTHON_BIN" -m isort backend scripts
+"$PYTHON_BIN" -m black backend scripts
 
 cd "$FRONTEND_ROOT"
 npm run format

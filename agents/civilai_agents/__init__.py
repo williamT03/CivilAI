@@ -1,1 +1,0 @@
-"""CivilAI agentic test harness."""

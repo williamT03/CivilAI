@@ -11,8 +11,8 @@ if (-not (Test-Path $pythonExe)) {
 
 Push-Location $repoRoot
 try {
-  & $pythonExe -m isort backend agents scripts
-  & $pythonExe -m black backend agents scripts
+  & $pythonExe -m isort backend scripts
+  & $pythonExe -m black backend scripts
 }
 finally {
   Pop-Location

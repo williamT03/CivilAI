@@ -6,7 +6,7 @@ After=network.target
 User=YOUR_LINUX_USER
 WorkingDirectory=/home/YOUR_LINUX_USER/CivilAI
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/YOUR_LINUX_USER/CivilAI/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/YOUR_LINUX_USER/CivilAI/.venv/bin/uvicorn backend.Features.Runtime_management.backend_run:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 

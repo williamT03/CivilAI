@@ -79,7 +79,7 @@ $shouldStartBackend = -not $FrontendOnly
 $shouldStartFrontend = -not $BackendOnly
 
 if ($shouldStartBackend) {
-  $backendCommand = "& '$pythonPath' -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
+  $backendCommand = "& '$pythonPath' -m uvicorn backend.Features.Runtime_management.backend_run:app --host 127.0.0.1 --port 8000 --reload"
   Start-LocalWindow -Name "CivilAI backend" -WorkingDirectory $repoRoot -Command $backendCommand -Port 8000 | Out-Null
 }
 
